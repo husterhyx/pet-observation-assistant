@@ -1,24 +1,29 @@
 import { useMemo, useRef, useState } from 'react'
 import {
-  Bone, Footprints, Bath, Scale, Syringe, Stethoscope, Smile, NotebookPen,
-  Bug, HeartPulse, Flag, Plus, Trash2, Camera, X, Dog, Cake, Pencil,
-  PawPrint, Package, ShoppingCart,
+  Bone, Droplets, Footprints, Bath, Scissors, Bean, Scale, Syringe, Bug,
+  HeartPulse, Stethoscope, Pill, Smile, NotebookPen, Flag, Plus, Trash2,
+  Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap,
 } from 'lucide-react'
 import { useDogData } from '@/hooks/useDogData'
 import {
-  RECORD_TYPE_META, SUPPLY_CATEGORIES, STOCK_META,
-  type DogProfile, type DogRecord, type RecordType, type StockLevel, type SupplyItem,
+  RECORD_TYPE_META, RECORD_GROUPS, SUPPLY_CATEGORIES, STOCK_META, expiryInfo,
+  type DailyPhoto, type DogProfile, type DogRecord, type RecordType,
+  type StockLevel, type SupplyItem,
 } from '@/types'
 
 const TYPE_ICON: Record<RecordType, typeof Bone> = {
   feed: Bone,
+  water: Droplets,
   walk: Footprints,
-  bath: Bath,
   weight: Scale,
+  bath: Bath,
+  groom: Scissors,
+  poop: Bean,
   vaccine: Syringe,
   deworm: Bug,
   checkup: HeartPulse,
   vet: Stethoscope,
+  meds: Pill,
   mood: Smile,
   note: NotebookPen,
   milestone: Flag,
@@ -26,17 +31,24 @@ const TYPE_ICON: Record<RecordType, typeof Bone> = {
 
 const TYPE_COLOR: Record<RecordType, string> = {
   feed: 'bg-[#F4A261]/15 text-[#C76E2B]',
+  water: 'bg-[#A8DADC]/40 text-[#2A7F83]',
   walk: 'bg-[#A8DADC]/40 text-[#2A7F83]',
-  bath: 'bg-[#A8DADC]/40 text-[#2A7F83]',
   weight: 'bg-[#E9C46A]/25 text-[#9A7B1E]',
+  bath: 'bg-[#A8DADC]/40 text-[#2A7F83]',
+  groom: 'bg-[#A8DADC]/40 text-[#2A7F83]',
+  poop: 'bg-[#F4A261]/15 text-[#C76E2B]',
   vaccine: 'bg-[#F4A261]/15 text-[#C76E2B]',
   deworm: 'bg-[#A8DADC]/40 text-[#2A7F83]',
   checkup: 'bg-[#A8DADC]/40 text-[#2A7F83]',
   vet: 'bg-[#E76F51]/15 text-[#C0452B]',
+  meds: 'bg-[#E76F51]/15 text-[#C0452B]',
   mood: 'bg-[#E9C46A]/25 text-[#9A7B1E]',
   note: 'bg-[#264653]/10 text-[#264653]',
   milestone: 'bg-[#E9C46A]/30 text-[#9A7B1E]',
 }
+
+/** 一键打卡：点一下立刻记一条 */
+const QUICK_TYPES: RecordType[] = ['feed', 'water', 'walk', 'poop']
 
 type Tab = 'diary' | 'photos' | 'supplies' | 'me'
 
@@ -69,6 +81,12 @@ function calcAge(birthday: string) {
   return `${Math.floor(months / 12)} 岁${months % 12 ? ` ${months % 12} 个月` : ''}`
 }
 
+function daysTogether(homeDate: string) {
+  if (!homeDate) return ''
+  const days = Math.floor((+new Date(new Date().toDateString()) - +new Date(homeDate)) / 86400000)
+  return days >= 0 ? `相伴第 ${days + 1} 天` : ''
+}
+
 function readImage(f: File | undefined, cb: (dataUrl: string) => void) {
   if (!f) return
   const reader = new FileReader()
@@ -86,7 +104,17 @@ export default function Home() {
       <div className="w-full max-w-md relative pb-28">
         <Header profile={data.profile} recordCount={data.records.length} />
 
-        {tab === 'diary' && <Timeline records={data.records} onDelete={data.removeRecord} />}
+        {tab === 'diary' && (
+          <>
+            <QuickRecord onQuick={t => data.addRecord({
+              type: t,
+              title: RECORD_TYPE_META[t].label,
+              note: '',
+              time: new Date().toISOString(),
+            })} />
+            <Timeline records={data.records} onDelete={data.removeRecord} />
+          </>
+        )}
         {tab === 'photos' && (
           <DailyPhotos
             photos={data.photos}
@@ -171,11 +199,49 @@ function Header({ profile, recordCount }: { profile: DogProfile; recordCount: nu
           {[
             profile.birthday && calcAge(profile.birthday),
             profile.breed || null,
+            profile.homeDate ? daysTogether(profile.homeDate) : null,
             recordCount ? `已记录 ${recordCount} 条` : null,
           ].filter(Boolean).join(' · ') || '开始记录它的每一天吧'}
         </p>
       </div>
     </header>
+  )
+}
+
+/* ---------------- 一键打卡 ---------------- */
+
+function QuickRecord({ onQuick }: { onQuick: (t: RecordType) => void }) {
+  const [done, setDone] = useState<RecordType | null>(null)
+  return (
+    <section className="px-5 mb-5">
+      <div className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
+        <h2 className="text-xs font-semibold text-[#264653]/50 flex items-center gap-1 mb-2.5">
+          <Zap size={12} className="text-[#F4A261]" /> 一键打卡
+        </h2>
+        <div className="grid grid-cols-4 gap-2">
+          {QUICK_TYPES.map(t => {
+            const Icon = TYPE_ICON[t]
+            const justDone = done === t
+            return (
+              <button
+                key={t}
+                onClick={() => {
+                  onQuick(t)
+                  setDone(t)
+                  setTimeout(() => setDone(d => (d === t ? null : d)), 1200)
+                }}
+                className={`flex flex-col items-center gap-1 py-2.5 rounded-2xl text-xs transition active:scale-95 ${
+                  justDone ? 'bg-[#F4A261] text-white font-semibold' : `${TYPE_COLOR[t]}`
+                }`}
+              >
+                <Icon size={20} />
+                {justDone ? '已记下✓' : RECORD_TYPE_META[t].label}
+              </button>
+            )
+          })}
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -253,7 +319,7 @@ function RecordCard({ record, onDelete }: { record: DogRecord; onDelete: () => v
   )
 }
 
-/* ---------------- 记一笔（底部弹层） ---------------- */
+/* ---------------- 记一笔（底部弹层，分类分组） ---------------- */
 
 function AddSheet({ defaultName, onClose, onSubmit }: {
   defaultName: string
@@ -295,23 +361,31 @@ function AddSheet({ defaultName, onClose, onSubmit }: {
           <button onClick={onClose} className="text-[#264653]/40" aria-label="关闭"><X size={22} /></button>
         </div>
 
-        <div className="grid grid-cols-4 gap-2 mb-4">
-          {(Object.keys(RECORD_TYPE_META) as RecordType[]).map(t => {
-            const Icon = TYPE_ICON[t]
-            const active = t === type
-            return (
-              <button
-                key={t}
-                onClick={() => setType(t)}
-                className={`flex flex-col items-center gap-1 py-2.5 rounded-2xl text-xs transition ${
-                  active ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/70'
-                }`}
-              >
-                <Icon size={20} />
-                {RECORD_TYPE_META[t].label}
-              </button>
-            )
-          })}
+        {/* 分组选择记录类型 */}
+        <div className="space-y-3 mb-4">
+          {RECORD_GROUPS.map(g => (
+            <div key={g.name}>
+              <p className="text-xs text-[#264653]/45 mb-1.5">{g.name}</p>
+              <div className="grid grid-cols-4 gap-2">
+                {g.types.map(t => {
+                  const Icon = TYPE_ICON[t]
+                  const active = t === type
+                  return (
+                    <button
+                      key={t}
+                      onClick={() => setType(t)}
+                      className={`flex flex-col items-center gap-1 py-2.5 rounded-2xl text-xs transition ${
+                        active ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/70'
+                      }`}
+                    >
+                      <Icon size={20} />
+                      {RECORD_TYPE_META[t].label}
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
         </div>
 
         <div className="space-y-3">
@@ -377,7 +451,7 @@ function AddSheet({ defaultName, onClose, onSubmit }: {
 /* ---------------- 每日一萌 ---------------- */
 
 function DailyPhotos({ photos, dogName, onSave, onDelete }: {
-  photos: import('@/types').DailyPhoto[]
+  photos: DailyPhoto[]
   dogName: string
   onSave: (date: string, photo: string, caption: string) => void
   onDelete: (id: string) => void
@@ -403,7 +477,6 @@ function DailyPhotos({ photos, dogName, onSave, onDelete }: {
         <p className="text-xs text-[#264653]/50 mt-0.5">每天一张，攒下{dogName ? `「${dogName}」的` : '它的'}可爱</p>
       </div>
 
-      {/* 今天的照片 */}
       {todayPhoto && !editing ? (
         <figure className="bg-[#FFFDF6] rounded-3xl p-3 shadow-sm shadow-[#264653]/5">
           <img src={todayPhoto.photo} alt="" className="rounded-2xl w-full max-h-80 object-cover" />
@@ -450,7 +523,6 @@ function DailyPhotos({ photos, dogName, onSave, onDelete }: {
         </div>
       )}
 
-      {/* 往日照片墙 */}
       {past.length > 0 && (
         <section>
           <h3 className="text-sm font-semibold text-[#264653]/50 mb-2">这些天的它</h3>
@@ -488,6 +560,10 @@ function Supplies({ supplies, onAdd, onUpdate, onDelete }: {
 }) {
   const [sheetOpen, setSheetOpen] = useState(false)
   const restock = supplies.filter(s => s.stock !== 'plenty')
+  const expiring = supplies.filter(s => {
+    const e = expiryInfo(s)
+    return e && e.state !== 'ok'
+  })
   const groups = useMemo(() => {
     const map = new Map<string, SupplyItem[]>()
     for (const cat of SUPPLY_CATEGORIES) map.set(cat, [])
@@ -523,12 +599,36 @@ function Supplies({ supplies, onAdd, onUpdate, onDelete }: {
           <ul className="space-y-1.5">
             {restock.map(s => (
               <li key={s.id} className="flex items-center justify-between text-sm">
-                <span>{s.name}</span>
-                <span className={`text-xs px-2.5 py-1 rounded-full font-medium ${STOCK_META[s.stock].cls}`}>
+                <span className="truncate">{s.brand ? `${s.brand} · ` : ''}{s.name}</span>
+                <span className={`text-xs px-2.5 py-1 rounded-full font-medium shrink-0 ${STOCK_META[s.stock].cls}`}>
                   {STOCK_META[s.stock].label}
                 </span>
               </li>
             ))}
+          </ul>
+        </section>
+      )}
+
+      {/* 临期 / 过期提醒 */}
+      {expiring.length > 0 && (
+        <section className="bg-[#E9C46A]/15 border border-[#E9C46A]/50 rounded-3xl p-4">
+          <h3 className="font-semibold text-[#9A7B1E] flex items-center gap-1.5 mb-2">
+            <AlarmClock size={16} /> 保质期提醒
+          </h3>
+          <ul className="space-y-1.5">
+            {expiring.map(s => {
+              const e = expiryInfo(s)!
+              return (
+                <li key={s.id} className="flex items-center justify-between text-sm gap-2">
+                  <span className="truncate">{s.brand ? `${s.brand} · ` : ''}{s.name}</span>
+                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium shrink-0 ${
+                    e.state === 'expired' ? 'bg-[#E76F51]/15 text-[#C0452B]' : 'bg-[#E9C46A]/30 text-[#9A7B1E]'
+                  }`}>
+                    {e.state === 'expired' ? `已过期 ${e.days} 天` : `${e.days} 天后到期`}
+                  </span>
+                </li>
+              )
+            })}
           </ul>
         </section>
       )}
@@ -546,28 +646,7 @@ function Supplies({ supplies, onAdd, onUpdate, onDelete }: {
           <h3 className="text-sm font-semibold text-[#264653]/50 mb-2">{cat}</h3>
           <div className="space-y-3">
             {list.map(s => (
-              <article key={s.id} className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
-                <div className="flex items-center justify-between gap-2">
-                  <h4 className="font-semibold truncate">{s.name}</h4>
-                  <button onClick={() => onDelete(s.id)} className="text-[#264653]/25 hover:text-[#E76F51] transition shrink-0" aria-label="删除">
-                    <Trash2 size={16} />
-                  </button>
-                </div>
-                {s.note && <p className="text-xs text-[#264653]/55 mt-1">{s.note}</p>}
-                <div className="flex gap-1.5 mt-2.5">
-                  {(Object.keys(STOCK_META) as StockLevel[]).map(lv => (
-                    <button
-                      key={lv}
-                      onClick={() => onUpdate(s.id, { stock: lv })}
-                      className={`text-xs px-3 py-1.5 rounded-full transition ${
-                        s.stock === lv ? `${STOCK_META[lv].cls} font-semibold` : 'bg-[#F5F0E1] text-[#264653]/45'
-                      }`}
-                    >
-                      {STOCK_META[lv].label}
-                    </button>
-                  ))}
-                </div>
-              </article>
+              <SupplyCard key={s.id} item={s} onUpdate={p => onUpdate(s.id, p)} onDelete={() => onDelete(s.id)} />
             ))}
           </div>
         </section>
@@ -578,15 +657,82 @@ function Supplies({ supplies, onAdd, onUpdate, onDelete }: {
   )
 }
 
+function SupplyCard({ item: s, onUpdate, onDelete }: {
+  item: SupplyItem
+  onUpdate: (p: Partial<SupplyItem>) => void
+  onDelete: () => void
+}) {
+  const e = expiryInfo(s)
+  return (
+    <article className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
+      <div className="flex items-start gap-3">
+        <div className="w-14 h-14 rounded-2xl bg-[#F5F0E1] overflow-hidden flex items-center justify-center shrink-0">
+          {s.photo
+            ? <img src={s.photo} alt="" className="w-full h-full object-cover" />
+            : <Package size={22} className="text-[#264653]/30" />}
+        </div>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="font-semibold truncate">
+              {s.brand && <span className="text-[#264653]/55 font-normal text-sm mr-1">{s.brand}</span>}
+              {s.name}
+            </h4>
+            <button onClick={onDelete} className="text-[#264653]/25 hover:text-[#E76F51] transition shrink-0" aria-label="删除">
+              <Trash2 size={16} />
+            </button>
+          </div>
+          {s.variant && <p className="text-xs text-[#264653]/55 mt-0.5">{s.variant}</p>}
+          {e && (
+            <p className={`text-xs mt-1 font-medium ${
+              e.state === 'expired' ? 'text-[#C0452B]' : e.state === 'soon' ? 'text-[#9A7B1E]' : 'text-[#264653]/45'
+            }`}>
+              {e.state === 'expired'
+                ? `已于 ${e.date} 过期（${e.days} 天前）`
+                : `${e.date} 到期${e.state === 'soon' ? `，还剩 ${e.days} 天` : ''}`}
+            </p>
+          )}
+          {s.note && <p className="text-xs text-[#264653]/55 mt-1">{s.note}</p>}
+        </div>
+      </div>
+      <div className="flex gap-1.5 mt-2.5">
+        {(Object.keys(STOCK_META) as StockLevel[]).map(lv => (
+          <button
+            key={lv}
+            onClick={() => onUpdate({ stock: lv })}
+            className={`text-xs px-3 py-1.5 rounded-full transition ${
+              s.stock === lv ? `${STOCK_META[lv].cls} font-semibold` : 'bg-[#F5F0E1] text-[#264653]/45'
+            }`}
+          >
+            {STOCK_META[lv].label}
+          </button>
+        ))}
+      </div>
+    </article>
+  )
+}
+
 function AddSupplySheet({ onClose, onSubmit }: {
   onClose: () => void
   onSubmit: (s: Omit<SupplyItem, 'id' | 'updatedAt'>) => void
 }) {
   const [name, setName] = useState('')
+  const [brand, setBrand] = useState('')
+  const [variant, setVariant] = useState('')
   const [category, setCategory] = useState(SUPPLY_CATEGORIES[0])
   const [stock, setStock] = useState<StockLevel>('plenty')
+  const [photo, setPhoto] = useState<string | undefined>()
+  const [produceDate, setProduceDate] = useState('')
+  const [shelfMonths, setShelfMonths] = useState('')
   const [note, setNote] = useState('')
+  const fileRef = useRef<HTMLInputElement>(null)
   const field = 'mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40'
+
+  const expiryPreview = (() => {
+    if (!produceDate || !shelfMonths) return ''
+    const exp = new Date(produceDate)
+    exp.setMonth(exp.getMonth() + Number(shelfMonths))
+    return `预计 ${exp.getFullYear()} 年 ${exp.getMonth() + 1} 月 ${exp.getDate()} 日到期`
+  })()
 
   return (
     <div className="fixed inset-0 z-30 flex items-end justify-center" onClick={onClose}>
@@ -600,10 +746,32 @@ function AddSupplySheet({ onClose, onSubmit }: {
           <button onClick={onClose} className="text-[#264653]/40" aria-label="关闭"><X size={22} /></button>
         </div>
         <div className="space-y-3">
+          {/* 照片 */}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => fileRef.current?.click()}
+              className="w-16 h-16 rounded-2xl border-2 border-dashed border-[#F4A261]/40 bg-[#F5F0E1]/60 flex items-center justify-center overflow-hidden shrink-0"
+            >
+              {photo ? <img src={photo} alt="" className="w-full h-full object-cover" /> : <Camera size={22} className="text-[#F4A261]" />}
+            </button>
+            <p className="text-xs text-[#264653]/50">拍一张物品照片，<br />一眼认出是哪一款</p>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => readImage(e.target.files?.[0], setPhoto)} />
+          </div>
+
           <label className="block">
-            <span className="text-xs text-[#264653]/50">名称</span>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="比如：鸡肉味狗粮 2kg" className={field} />
+            <span className="text-xs text-[#264653]/50">名称 *</span>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="比如：全价冻干狗粮" className={field} />
           </label>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-xs text-[#264653]/50">品牌</span>
+              <input value={brand} onChange={e => setBrand(e.target.value)} placeholder="比如：渴望" className={field} />
+            </label>
+            <label className="block">
+              <span className="text-xs text-[#264653]/50">款式 / 规格</span>
+              <input value={variant} onChange={e => setVariant(e.target.value)} placeholder="比如：鸡肉味 2kg" className={field} />
+            </label>
+          </div>
           <div>
             <span className="text-xs text-[#264653]/50">分类</span>
             <div className="grid grid-cols-3 gap-2 mt-1">
@@ -618,6 +786,17 @@ function AddSupplySheet({ onClose, onSubmit }: {
               ))}
             </div>
           </div>
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-xs text-[#264653]/50">生产日期</span>
+              <input type="date" value={produceDate} onChange={e => setProduceDate(e.target.value)} className={field} />
+            </label>
+            <label className="block">
+              <span className="text-xs text-[#264653]/50">保质期（月）</span>
+              <input type="number" inputMode="numeric" min="1" value={shelfMonths} onChange={e => setShelfMonths(e.target.value)} placeholder="比如：18" className={field} />
+            </label>
+          </div>
+          {expiryPreview && <p className="text-xs text-[#9A7B1E] flex items-center gap-1"><AlarmClock size={12} /> {expiryPreview}</p>}
           <div>
             <span className="text-xs text-[#264653]/50">当前余量</span>
             <div className="grid grid-cols-3 gap-2 mt-1">
@@ -634,10 +813,16 @@ function AddSupplySheet({ onClose, onSubmit }: {
           </div>
           <label className="block">
             <span className="text-xs text-[#264653]/50">备注</span>
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="规格、常买的店、大概能吃多久…" className={field} />
+            <input value={note} onChange={e => setNote(e.target.value)} placeholder="常买的店、大概能吃多久…" className={field} />
           </label>
           <button
-            onClick={() => name.trim() && onSubmit({ name: name.trim(), category, stock, note: note.trim() })}
+            onClick={() => name.trim() && onSubmit({
+              name: name.trim(), brand: brand.trim(), variant: variant.trim(),
+              category, stock, photo,
+              produceDate: produceDate || undefined,
+              shelfMonths: shelfMonths ? Number(shelfMonths) : undefined,
+              note: note.trim(),
+            })}
             className="w-full bg-[#F4A261] text-white font-bold rounded-2xl py-3.5 active:scale-[0.98] transition disabled:opacity-40"
             disabled={!name.trim()}
           >
@@ -754,27 +939,50 @@ function ProfilePage({ profile, onSave }: { profile: DogProfile; onSave: (p: Dog
         <span className="text-xs text-[#264653]/50">品种</span>
         <input value={draft.breed} onChange={e => setDraft(d => ({ ...d, breed: e.target.value }))} placeholder="比如：柯基 / 金毛 / 小土狗" className={field} />
       </label>
-      <label className="block">
-        <span className="text-xs text-[#264653]/50">生日</span>
-        <input type="date" value={draft.birthday} onChange={e => setDraft(d => ({ ...d, birthday: e.target.value }))} className={field} />
-      </label>
-      <div>
-        <span className="text-xs text-[#264653]/50">性别</span>
-        <div className="grid grid-cols-2 gap-2 mt-1">
-          {(['boy', 'girl'] as const).map(g => (
-            <button
-              key={g}
-              onClick={() => setDraft(d => ({ ...d, gender: g }))}
-              className={`rounded-2xl py-2.5 text-sm transition ${draft.gender === g ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#FFFDF6] border border-[#264653]/10'}`}
-            >
-              {g === 'boy' ? '弟弟' : '妹妹'}
-            </button>
-          ))}
+      <div className="grid grid-cols-2 gap-2">
+        <label className="block">
+          <span className="text-xs text-[#264653]/50">生日</span>
+          <input type="date" value={draft.birthday} onChange={e => setDraft(d => ({ ...d, birthday: e.target.value }))} className={field} />
+        </label>
+        <label className="block">
+          <span className="text-xs text-[#264653]/50">到家日</span>
+          <input type="date" value={draft.homeDate} onChange={e => setDraft(d => ({ ...d, homeDate: e.target.value }))} className={field} />
+        </label>
+      </div>
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <span className="text-xs text-[#264653]/50">性别</span>
+          <div className="grid grid-cols-2 gap-1.5 mt-1">
+            {(['boy', 'girl'] as const).map(g => (
+              <button
+                key={g}
+                onClick={() => setDraft(d => ({ ...d, gender: g }))}
+                className={`rounded-2xl py-2.5 text-sm transition ${draft.gender === g ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#FFFDF6] border border-[#264653]/10'}`}
+              >
+                {g === 'boy' ? '弟弟' : '妹妹'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div>
+          <span className="text-xs text-[#264653]/50">是否绝育</span>
+          <div className="grid grid-cols-2 gap-1.5 mt-1">
+            {([['yes', '已绝育'], ['no', '未绝育']] as const).map(([v, label]) => (
+              <button
+                key={v}
+                onClick={() => setDraft(d => ({ ...d, neutered: v }))}
+                className={`rounded-2xl py-2.5 text-sm transition ${draft.neutered === v ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#FFFDF6] border border-[#264653]/10'}`}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
       </div>
-      {draft.birthday && (
-        <p className="text-sm text-[#264653]/60 flex items-center gap-1.5">
-          <Cake size={14} /> 现在 {calcAge(draft.birthday)}啦
+      {(draft.birthday || draft.homeDate) && (
+        <p className="text-sm text-[#264653]/60 flex flex-wrap items-center gap-x-3 gap-y-1">
+          {draft.birthday && <span className="flex items-center gap-1.5"><Cake size={14} /> 现在 {calcAge(draft.birthday)}啦</span>}
+          {draft.homeDate && <span className="flex items-center gap-1.5"><PawPrint size={14} /> {daysTogether(draft.homeDate)}</span>}
         </p>
       )}
       <button

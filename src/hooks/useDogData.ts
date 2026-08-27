@@ -19,14 +19,25 @@ const DEFAULT_PROFILE: DogProfile = {
   name: '',
   breed: '',
   birthday: '',
+  homeDate: '',
   gender: 'boy',
+  neutered: '',
 }
 
 export function useDogData() {
   const [records, setRecords] = useState<DogRecord[]>(() => load(RECORDS_KEY, []))
-  const [profile, setProfile] = useState<DogProfile>(() => load(PROFILE_KEY, DEFAULT_PROFILE))
+  const [profile, setProfile] = useState<DogProfile>(() => ({
+    ...DEFAULT_PROFILE,
+    ...load(PROFILE_KEY, DEFAULT_PROFILE),
+  }))
   const [photos, setPhotos] = useState<DailyPhoto[]>(() => load(PHOTOS_KEY, []))
-  const [supplies, setSupplies] = useState<SupplyItem[]>(() => load(SUPPLIES_KEY, []))
+  const [supplies, setSupplies] = useState<SupplyItem[]>(() =>
+    // 兼容旧版本数据：补齐新字段
+    load(SUPPLIES_KEY, []).map((s: Partial<SupplyItem> & { id: string; name: string; category: string; stock: SupplyItem['stock'] }) => ({
+      brand: '', variant: '', note: '', updatedAt: new Date().toISOString(),
+      ...s,
+    }))
+  )
 
   useEffect(() => { localStorage.setItem(RECORDS_KEY, JSON.stringify(records)) }, [records])
   useEffect(() => { localStorage.setItem(PROFILE_KEY, JSON.stringify(profile)) }, [profile])
