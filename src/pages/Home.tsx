@@ -2,9 +2,10 @@ import { useMemo, useRef, useState } from 'react'
 import {
   Bone, Droplets, Footprints, Bath, Scissors, Bean, Scale, Syringe, Bug,
   HeartPulse, Stethoscope, Pill, Smile, NotebookPen, Flag, Plus, Trash2,
-  Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap,
+  Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap, LogOut,
 } from 'lucide-react'
-import { useDogData } from '@/hooks/useDogData'
+import { useDogData, STANDALONE } from '@/hooks/useDogData'
+import { useAuth } from '@/hooks/useAuth'
 import {
   RECORD_TYPE_META, RECORD_GROUPS, SUPPLY_CATEGORIES, STOCK_META, expiryInfo,
   type DailyPhoto, type DogProfile, type DogRecord, type RecordType,
@@ -95,9 +96,31 @@ function readImage(f: File | undefined, cb: (dataUrl: string) => void) {
 }
 
 export default function Home() {
+  const { user, isLoading } = useAuth({ redirectOnUnauthenticated: !STANDALONE })
+
+  if (STANDALONE) return <MainApp />
+  if (isLoading) return <Splash text="正在打开小日子…" />
+  if (!user) return null // 自动跳转登录页
+
+  return <MainApp />
+}
+
+function Splash({ text }: { text: string }) {
+  return (
+    <div className="min-h-dvh bg-[#F5F0E1] flex flex-col items-center justify-center gap-3 text-[#264653]/60">
+      <PawPrint size={40} className="text-[#F4A261] animate-pulse" />
+      <p className="text-sm">{text}</p>
+    </div>
+  )
+}
+
+function MainApp() {
   const data = useDogData()
+  const { user, logout } = useAuth()
   const [tab, setTab] = useState<Tab>('diary')
   const [sheetOpen, setSheetOpen] = useState(false)
+
+  if (data.isLoading) return <Splash text="正在同步云端数据…" />
 
   return (
     <div className="min-h-dvh bg-[#F5F0E1] text-[#264653] flex justify-center">
@@ -140,6 +163,24 @@ export default function Home() {
               <div className="h-px flex-1 bg-[#264653]/10" />
             </div>
             <Stats records={data.records} />
+            {!STANDALONE && (
+              <div className="px-5 mt-8">
+                <button
+                  onClick={logout}
+                  className="w-full flex items-center justify-center gap-2 text-sm text-[#264653]/50 bg-[#FFFDF6] border border-[#264653]/10 rounded-2xl py-3"
+                >
+                  <LogOut size={15} /> 退出登录{user?.name ? `（${user.name}）` : ''}
+                </button>
+                <p className="text-center text-[11px] text-[#264653]/35 mt-3">
+                  数据已保存在云端，换设备登录即可同步
+                </p>
+              </div>
+            )}
+            {STANDALONE && (
+              <p className="text-center text-[11px] text-[#264653]/35 mt-8 px-5">
+                离线版 · 数据保存在本机浏览器
+              </p>
+            )}
           </>
         )}
 
