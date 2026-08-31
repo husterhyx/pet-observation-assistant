@@ -2,10 +2,11 @@ import { useMemo, useRef, useState } from 'react'
 import {
   Bone, Droplets, Footprints, Bath, Scissors, Bean, Scale, Syringe, Bug,
   HeartPulse, Stethoscope, Pill, Smile, NotebookPen, Flag, Plus, Trash2,
-  Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap, LogOut,
+  Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap,
+  Cloud, RefreshCw, Server, CheckCircle2, AlertCircle,
 } from 'lucide-react'
-import { useDogData, STANDALONE } from '@/hooks/useDogData'
-import { useAuth } from '@/hooks/useAuth'
+import { useDogData } from '@/hooks/useDogData'
+import { useSync } from '@/hooks/useSync'
 import {
   RECORD_TYPE_META, RECORD_GROUPS, SUPPLY_CATEGORIES, STOCK_META, expiryInfo,
   type DailyPhoto, type DogProfile, type DogRecord, type RecordType,
@@ -51,6 +52,16 @@ const TYPE_COLOR: Record<RecordType, string> = {
 /** 一键打卡：点一下立刻记一条 */
 const QUICK_TYPES: RecordType[] = ['feed', 'water', 'walk', 'poop']
 
+/** 需要填写详情才能形成有效统计的记录入口 */
+const DETAIL_ENTRIES: { type: RecordType; label: string }[] = [
+  { type: 'walk', label: '遛弯时长' },
+  { type: 'weight', label: '体重趋势' },
+  { type: 'deworm', label: '驱虫' },
+  { type: 'vaccine', label: '疫苗' },
+  { type: 'checkup', label: '体检' },
+  { type: 'milestone', label: '大事件' },
+]
+
 type Tab = 'diary' | 'photos' | 'supplies' | 'me'
 
 function fmtDate(iso: string) {
@@ -90,18 +101,22 @@ function daysTogether(homeDate: string) {
 
 function readImage(f: File | undefined, cb: (dataUrl: string) => void) {
   if (!f) return
-  const reader = new FileReader()
-  reader.onload = () => cb(reader.result as string)
-  reader.readAsDataURL(f)
+  const image = new Image()
+  const objectUrl = URL.createObjectURL(f)
+  image.onload = () => {
+    const scale = Math.min(1, 2048 / Math.max(image.naturalWidth, image.naturalHeight))
+    const canvas = document.createElement('canvas')
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
+    canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
+    URL.revokeObjectURL(objectUrl)
+    cb(canvas.toDataURL('image/jpeg', 0.82))
+  }
+  image.onerror = () => URL.revokeObjectURL(objectUrl)
+  image.src = objectUrl
 }
 
 export default function Home() {
-  const { user, isLoading } = useAuth({ redirectOnUnauthenticated: !STANDALONE })
-
-  if (STANDALONE) return <MainApp />
-  if (isLoading) return <Splash text="正在打开小日子…" />
-  if (!user) return null // 自动跳转登录页
-
   return <MainApp />
 }
 
@@ -116,11 +131,17 @@ function Splash({ text }: { text: string }) {
 
 function MainApp() {
   const data = useDogData()
-  const { user, logout } = useAuth()
+  const sync = useSync()
   const [tab, setTab] = useState<Tab>('diary')
   const [sheetOpen, setSheetOpen] = useState(false)
+  const [sheetType, setSheetType] = useState<RecordType>('feed')
 
-  if (data.isLoading) return <Splash text="正在同步云端数据…" />
+  const openRecordSheet = (type: RecordType = 'feed') => {
+    setSheetType(type)
+    setSheetOpen(true)
+  }
+
+  if (data.isLoading) return <Splash text="正在打开本地数据…" />
 
   return (
     <div className="min-h-dvh bg-[#F5F0E1] text-[#264653] flex justify-center">
@@ -129,12 +150,15 @@ function MainApp() {
 
         {tab === 'diary' && (
           <>
-            <QuickRecord onQuick={t => data.addRecord({
-              type: t,
-              title: RECORD_TYPE_META[t].label,
-              note: '',
-              time: new Date().toISOString(),
-            })} />
+            <QuickRecord
+              onQuick={t => data.addRecord({
+                type: t,
+                title: RECORD_TYPE_META[t].label,
+                note: '',
+                time: new Date().toISOString(),
+              })}
+              onDetailed={openRecordSheet}
+            />
             <Timeline records={data.records} onDelete={data.removeRecord} />
           </>
         )}
@@ -162,25 +186,8 @@ function MainApp() {
               <span className="text-xs text-[#264653]/40">统计</span>
               <div className="h-px flex-1 bg-[#264653]/10" />
             </div>
-            <Stats records={data.records} />
-            {!STANDALONE && (
-              <div className="px-5 mt-8">
-                <button
-                  onClick={logout}
-                  className="w-full flex items-center justify-center gap-2 text-sm text-[#264653]/50 bg-[#FFFDF6] border border-[#264653]/10 rounded-2xl py-3"
-                >
-                  <LogOut size={15} /> 退出登录{user?.name ? `（${user.name}）` : ''}
-                </button>
-                <p className="text-center text-[11px] text-[#264653]/35 mt-3">
-                  数据已保存在云端，换设备登录即可同步
-                </p>
-              </div>
-            )}
-            {STANDALONE && (
-              <p className="text-center text-[11px] text-[#264653]/35 mt-8 px-5">
-                离线版 · 数据保存在本机浏览器
-              </p>
-            )}
+            <Stats records={data.records} onAddRecord={openRecordSheet} />
+            <SyncSettings sync={sync} />
           </>
         )}
 
@@ -190,7 +197,7 @@ function MainApp() {
             <NavItem active={tab === 'diary'} onClick={() => setTab('diary')} label="日记" icon={NotebookPen} />
             <NavItem active={tab === 'photos'} onClick={() => setTab('photos')} label="每日一萌" icon={PawPrint} />
             <button
-              onClick={() => setSheetOpen(true)}
+              onClick={() => openRecordSheet()}
               className="justify-self-center -mt-8 w-14 h-14 rounded-full bg-[#F4A261] text-white shadow-lg shadow-[#F4A261]/40 flex items-center justify-center active:scale-95 transition"
               aria-label="记一笔"
             >
@@ -203,6 +210,7 @@ function MainApp() {
 
         {sheetOpen && (
           <AddSheet
+            initialType={sheetType}
             defaultName={data.profile.name}
             onClose={() => setSheetOpen(false)}
             onSubmit={r => { data.addRecord(r); setSheetOpen(false); setTab('diary') }}
@@ -251,7 +259,10 @@ function Header({ profile, recordCount }: { profile: DogProfile; recordCount: nu
 
 /* ---------------- 一键打卡 ---------------- */
 
-function QuickRecord({ onQuick }: { onQuick: (t: RecordType) => void }) {
+function QuickRecord({ onQuick, onDetailed }: {
+  onQuick: (t: RecordType) => void
+  onDetailed: (t: RecordType) => void
+}) {
   const [done, setDone] = useState<RecordType | null>(null)
   return (
     <section className="px-5 mb-5">
@@ -277,6 +288,23 @@ function QuickRecord({ onQuick }: { onQuick: (t: RecordType) => void }) {
               >
                 <Icon size={20} />
                 {justDone ? '已记下✓' : RECORD_TYPE_META[t].label}
+              </button>
+            )
+          })}
+        </div>
+        <div className="h-px bg-[#264653]/8 my-3" />
+        <h3 className="text-xs font-semibold text-[#264653]/50 mb-2.5">健康与成长</h3>
+        <div className="grid grid-cols-3 gap-2">
+          {DETAIL_ENTRIES.map(({ type, label }) => {
+            const Icon = TYPE_ICON[type]
+            return (
+              <button
+                key={label}
+                onClick={() => onDetailed(type)}
+                className="flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-xs bg-[#F5F0E1] text-[#264653]/75 transition active:scale-95"
+              >
+                <Icon size={16} className={TYPE_COLOR[type].split(' ')[1]} />
+                {label}
               </button>
             )
           })}
@@ -362,12 +390,13 @@ function RecordCard({ record, onDelete }: { record: DogRecord; onDelete: () => v
 
 /* ---------------- 记一笔（底部弹层，分类分组） ---------------- */
 
-function AddSheet({ defaultName, onClose, onSubmit }: {
+function AddSheet({ initialType, defaultName, onClose, onSubmit }: {
+  initialType?: RecordType
   defaultName: string
   onClose: () => void
   onSubmit: (r: Omit<DogRecord, 'id'>) => void
 }) {
-  const [type, setType] = useState<RecordType>('feed')
+  const [type, setType] = useState<RecordType>(initialType ?? 'feed')
   const [note, setNote] = useState('')
   const [value, setValue] = useState('')
   const [time, setTime] = useState(() => {
@@ -877,21 +906,127 @@ function AddSupplySheet({ onClose, onSubmit }: {
 
 /* ---------------- 统计 ---------------- */
 
-function Stats({ records }: { records: DogRecord[] }) {
-  const weekAgo = Date.now() - 7 * 86400000
+function SyncSettings({ sync }: { sync: ReturnType<typeof useSync> }) {
+  const urlRef = useRef<HTMLInputElement>(null)
+  const keyRef = useRef<HTMLInputElement>(null)
+  const [notice, setNotice] = useState('')
+  const status = sync.status
+
+  const save = async () => {
+    setNotice('')
+    try {
+      await sync.configure({
+        serverUrl: urlRef.current?.value.trim() ?? '',
+        apiKey: keyRef.current?.value.trim() || undefined,
+      })
+      if (keyRef.current) keyRef.current.value = ''
+      setNotice('连接设置已保存')
+    } catch {
+      setNotice('保存失败，请检查地址和密钥')
+    }
+  }
+
+  const run = async () => {
+    setNotice('')
+    try {
+      await sync.run()
+      setNotice('同步完成')
+    } catch {
+      setNotice('同步失败，请检查服务器状态')
+    }
+  }
+
+  return (
+    <section className="px-5 mt-8 mb-2">
+      <div className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5 space-y-3">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Server size={18} className="text-[#F4A261]" />
+            <div>
+              <h2 className="font-semibold text-sm">个人服务器同步</h2>
+              <p className="text-[11px] text-[#264653]/45">本地优先，联网后自动同步</p>
+            </div>
+          </div>
+          <span className={`text-[11px] px-2.5 py-1 rounded-full ${
+            status?.configured ? 'bg-[#A8DADC]/40 text-[#2A7F83]' : 'bg-[#264653]/8 text-[#264653]/45'
+          }`}>
+            {status?.configured ? '已配置' : '仅本地'}
+          </span>
+        </div>
+
+        <label className="block">
+          <span className="text-xs text-[#264653]/50">服务器地址</span>
+          <input
+            key={status?.serverUrl ?? ''}
+            ref={urlRef}
+            defaultValue={status?.serverUrl ?? ''}
+            placeholder="https://你的域名"
+            inputMode="url"
+            className="mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40"
+          />
+        </label>
+        <label className="block">
+          <span className="text-xs text-[#264653]/50">固定设备密钥</span>
+          <input
+            ref={keyRef}
+            type="password"
+            placeholder={status?.hasApiKey ? '已保存；留空表示不修改' : '输入服务器设备密钥'}
+            autoComplete="off"
+            className="mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40"
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <button onClick={save} className="rounded-2xl py-2.5 text-sm font-semibold bg-[#F4A261] text-white">
+            保存设置
+          </button>
+          <button
+            onClick={run}
+            disabled={!status?.configured || sync.isSyncing}
+            className="rounded-2xl py-2.5 text-sm font-semibold bg-[#F5F0E1] text-[#264653] disabled:opacity-40 flex items-center justify-center gap-1.5"
+          >
+            <RefreshCw size={14} className={sync.isSyncing ? 'animate-spin' : ''} />
+            {sync.isSyncing ? '同步中' : '立即同步'}
+          </button>
+        </div>
+
+        <div className="text-[11px] text-[#264653]/45 space-y-1">
+          <p className="flex items-center gap-1.5">
+            <Cloud size={12} /> 待同步变更：{status?.pendingChanges ?? 0}
+          </p>
+          <p>上次同步：{status?.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString() : '尚未同步'}</p>
+          {(notice || sync.syncError) && (
+            <p className={`flex items-center gap-1.5 ${sync.syncError ? 'text-[#C0452B]' : 'text-[#2A7F83]'}`}>
+              {sync.syncError ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
+              {sync.syncError || notice}
+            </p>
+          )}
+        </div>
+      </div>
+      <p className="text-center text-[11px] text-[#264653]/35 mt-3">
+        数据保存在本机 SQLite；远程连接只接受 HTTPS
+      </p>
+    </section>
+  )
+}
+
+function Stats({ records, onAddRecord }: {
+  records: DogRecord[]
+  onAddRecord: (type: RecordType) => void
+}) {
+  const [weekAgo] = useState(() => Date.now() - 7 * 86400000)
   const week = records.filter(r => +new Date(r.time) >= weekAgo)
   const count = (t: RecordType, list = records) => list.filter(r => r.type === t).length
   const walkMins = week.filter(r => r.type === 'walk').reduce((s, r) => s + (r.value ?? 0), 0)
   const weights = records.filter(r => r.type === 'weight' && r.value != null).slice(0, 20).reverse()
 
-  const items: { label: string; value: string; icon: typeof Bone; cls: string }[] = [
-    { label: '本周遛狗', value: `${count('walk', week)} 次`, icon: Footprints, cls: TYPE_COLOR.walk },
-    { label: '本周遛弯时长', value: walkMins ? `${walkMins} 分钟` : '—', icon: Footprints, cls: TYPE_COLOR.walk },
-    { label: '本周喂食', value: `${count('feed', week)} 次`, icon: Bone, cls: TYPE_COLOR.feed },
-    { label: '驱虫累计', value: `${count('deworm')} 次`, icon: Bug, cls: TYPE_COLOR.deworm },
-    { label: '体检累计', value: `${count('checkup')} 次`, icon: HeartPulse, cls: TYPE_COLOR.checkup },
-    { label: '疫苗记录', value: `${count('vaccine')} 条`, icon: Syringe, cls: TYPE_COLOR.vaccine },
-    { label: '大事件', value: `${count('milestone')} 件`, icon: Flag, cls: TYPE_COLOR.milestone },
+  const items: { label: string; value: string; icon: typeof Bone; cls: string; type?: RecordType }[] = [
+    { label: '本周遛狗', value: `${count('walk', week)} 次`, icon: Footprints, cls: TYPE_COLOR.walk, type: 'walk' },
+    { label: '本周遛弯时长', value: walkMins ? `${walkMins} 分钟` : '—', icon: Footprints, cls: TYPE_COLOR.walk, type: 'walk' },
+    { label: '本周喂食', value: `${count('feed', week)} 次`, icon: Bone, cls: TYPE_COLOR.feed, type: 'feed' },
+    { label: '驱虫累计', value: `${count('deworm')} 次`, icon: Bug, cls: TYPE_COLOR.deworm, type: 'deworm' },
+    { label: '体检累计', value: `${count('checkup')} 次`, icon: HeartPulse, cls: TYPE_COLOR.checkup, type: 'checkup' },
+    { label: '疫苗记录', value: `${count('vaccine')} 条`, icon: Syringe, cls: TYPE_COLOR.vaccine, type: 'vaccine' },
+    { label: '大事件', value: `${count('milestone')} 件`, icon: Flag, cls: TYPE_COLOR.milestone, type: 'milestone' },
     { label: '全部记录', value: `${records.length} 条`, icon: NotebookPen, cls: TYPE_COLOR.note },
   ]
 
@@ -899,18 +1034,33 @@ function Stats({ records }: { records: DogRecord[] }) {
     <div className="px-5 space-y-6">
       <div className="grid grid-cols-2 gap-3">
         {items.map(it => (
-          <div key={it.label} className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
+          <button
+            key={it.label}
+            type="button"
+            onClick={() => it.type && onAddRecord(it.type)}
+            disabled={!it.type}
+            className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5 text-left disabled:cursor-default active:enabled:scale-[0.98] transition"
+          >
             <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${it.cls}`}>
               <it.icon size={18} />
             </div>
             <p className="text-xl font-bold">{it.value}</p>
             <p className="text-xs text-[#264653]/50 mt-0.5">{it.label}</p>
-          </div>
+          </button>
         ))}
       </div>
 
       <section className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
-        <h2 className="font-semibold mb-3">体重趋势</h2>
+        <div className="flex items-center justify-between gap-3 mb-3">
+          <h2 className="font-semibold">体重趋势</h2>
+          <button
+            type="button"
+            onClick={() => onAddRecord('weight')}
+            className="text-xs font-semibold text-[#C76E2B] bg-[#F4A261]/15 rounded-full px-3 py-1.5"
+          >
+            记录体重
+          </button>
+        </div>
         {weights.length >= 2 ? <WeightChart data={weights} /> : (
           <p className="text-sm text-[#264653]/50 py-6 text-center">
             记录两次以上体重后，这里会出现趋势曲线

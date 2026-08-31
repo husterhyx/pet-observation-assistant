@@ -1,106 +1,109 @@
-import {
-  mysqlTable,
-  mysqlEnum,
-  serial,
-  bigint,
-  int,
-  double,
-  varchar,
-  text,
-  mediumtext,
-  timestamp,
-  uniqueIndex,
-  index,
-} from "drizzle-orm/mysql-core";
+import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-export const users = mysqlTable("users", {
-  id: serial("id").primaryKey(),
-  unionId: varchar("unionId", { length: 255 }).notNull().unique(),
-  name: varchar("name", { length: 255 }),
-  email: varchar("email", { length: 320 }),
-  avatar: text("avatar"),
-  role: mysqlEnum("role", ["user", "admin"]).default("user").notNull(),
-  createdAt: timestamp("createdAt").defaultNow().notNull(),
-  updatedAt: timestamp("updatedAt")
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()),
-  lastSignInAt: timestamp("lastSignInAt").defaultNow().notNull(),
+const syncColumns = {
+  updatedAt: text("updatedAt").notNull(),
+  modifiedByDeviceId: text("modifiedByDeviceId").notNull(),
+  deletedAt: text("deletedAt"),
+};
+
+export const dogProfiles = sqliteTable("dog_profiles", {
+  id: text("id").primaryKey(),
+  name: text("name").default("").notNull(),
+  breed: text("breed").default("").notNull(),
+  birthday: text("birthday").default("").notNull(),
+  homeDate: text("homeDate").default("").notNull(),
+  gender: text("gender", { enum: ["boy", "girl"] }).default("boy").notNull(),
+  neutered: text("neutered", { enum: ["", "yes", "no"] }).default("").notNull(),
+  avatarAttachmentId: text("avatarAttachmentId"),
+  ...syncColumns,
 });
 
-export type User = typeof users.$inferSelect;
-export type InsertUser = typeof users.$inferInsert;
-
-/** 狗狗档案（每用户一条） */
-export const dogProfiles = mysqlTable("dog_profiles", {
-  id: serial("id").primaryKey(),
-  userId: bigint("userId", { mode: "number", unsigned: true }).notNull().unique(),
-  name: varchar("name", { length: 100 }).default("").notNull(),
-  breed: varchar("breed", { length: 100 }).default("").notNull(),
-  birthday: varchar("birthday", { length: 10 }).default("").notNull(),
-  homeDate: varchar("homeDate", { length: 10 }).default("").notNull(),
-  gender: mysqlEnum("gender", ["boy", "girl"]).default("boy").notNull(),
-  neutered: varchar("neutered", { length: 8 }).default("").notNull(),
-  avatar: mediumtext("avatar"),
-  updatedAt: timestamp("updatedAt")
-    .defaultNow()
-    .notNull()
-    .$onUpdate(() => new Date()),
-});
-
-/** 日常记录 */
-export const dogRecords = mysqlTable(
+export const dogRecords = sqliteTable(
   "dog_records",
   {
-    id: serial("id").primaryKey(),
-    userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
-    type: varchar("type", { length: 20 }).notNull(),
-    title: varchar("title", { length: 100 }).notNull(),
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    title: text("title").notNull(),
     note: text("note").notNull(),
-    time: timestamp("time").notNull(),
-    value: double("value"),
-    photo: mediumtext("photo"),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    time: text("time").notNull(),
+    value: real("value"),
+    photoAttachmentId: text("photoAttachmentId"),
+    createdAt: text("createdAt").notNull(),
+    ...syncColumns,
   },
-  (t) => [index("records_user_time_idx").on(t.userId, t.time)],
+  (table) => [index("records_time_idx").on(table.time)],
 );
 
-/** 每日一萌 */
-export const dailyPhotos = mysqlTable(
+export const dailyPhotos = sqliteTable(
   "daily_photos",
   {
-    id: serial("id").primaryKey(),
-    userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
-    date: varchar("date", { length: 10 }).notNull(),
-    photo: mediumtext("photo").notNull(),
-    caption: varchar("caption", { length: 500 }).default("").notNull(),
-    createdAt: timestamp("createdAt").defaultNow().notNull(),
+    id: text("id").primaryKey(),
+    date: text("date").notNull(),
+    photoAttachmentId: text("photoAttachmentId").notNull(),
+    caption: text("caption").default("").notNull(),
+    createdAt: text("createdAt").notNull(),
+    ...syncColumns,
   },
-  (t) => [uniqueIndex("photos_user_date_idx").on(t.userId, t.date)],
+  (table) => [uniqueIndex("photos_date_idx").on(table.date)],
 );
 
-/** 物品清单 */
-export const supplies = mysqlTable(
+export const supplies = sqliteTable(
   "supplies",
   {
-    id: serial("id").primaryKey(),
-    userId: bigint("userId", { mode: "number", unsigned: true }).notNull(),
-    name: varchar("name", { length: 200 }).notNull(),
-    brand: varchar("brand", { length: 100 }).default("").notNull(),
-    variant: varchar("variant", { length: 200 }).default("").notNull(),
-    category: varchar("category", { length: 20 }).notNull(),
-    stock: varchar("stock", { length: 10 }).notNull(),
-    photo: mediumtext("photo"),
-    produceDate: varchar("produceDate", { length: 10 }),
-    shelfMonths: int("shelfMonths"),
-    note: text("note").notNull(),
-    updatedAt: timestamp("updatedAt")
-      .defaultNow()
-      .notNull()
-      .$onUpdate(() => new Date()),
+    id: text("id").primaryKey(),
+    name: text("name").notNull(),
+    brand: text("brand").default("").notNull(),
+    variant: text("variant").default("").notNull(),
+    category: text("category").notNull(),
+    stock: text("stock", { enum: ["plenty", "low", "empty"] }).notNull(),
+    photoAttachmentId: text("photoAttachmentId"),
+    produceDate: text("produceDate"),
+    shelfMonths: integer("shelfMonths"),
+    note: text("note").default("").notNull(),
+    ...syncColumns,
   },
-  (t) => [index("supplies_user_idx").on(t.userId)],
+  (table) => [index("supplies_updated_idx").on(table.updatedAt)],
 );
+
+export const attachments = sqliteTable("attachments", {
+  id: text("id").primaryKey(),
+  mimeType: text("mimeType").notNull(),
+  size: integer("size").notNull(),
+  extension: text("extension").notNull(),
+  createdAt: text("createdAt").notNull(),
+});
+
+export const changeLog = sqliteTable(
+  "change_log",
+  {
+    revision: integer("revision").primaryKey({ autoIncrement: true }),
+    changeId: text("changeId").notNull(),
+    deviceId: text("deviceId").notNull(),
+    entityType: text("entityType").notNull(),
+    entityId: text("entityId").notNull(),
+    operation: text("operation", { enum: ["upsert", "delete"] }).notNull(),
+    modifiedAt: text("modifiedAt").notNull(),
+    payload: text("payload").notNull(),
+  },
+  (table) => [
+    uniqueIndex("change_id_idx").on(table.changeId),
+    index("change_revision_idx").on(table.revision),
+  ],
+);
+
+export const outbox = sqliteTable("outbox", {
+  changeId: text("changeId").primaryKey(),
+  entityType: text("entityType").notNull(),
+  entityId: text("entityId").notNull(),
+  operation: text("operation", { enum: ["upsert", "delete"] }).notNull(),
+  modifiedAt: text("modifiedAt").notNull(),
+  payload: text("payload").notNull(),
+});
+
+export const appSettings = sqliteTable("app_settings", {
+  key: text("key").primaryKey(),
+  value: text("value").notNull(),
+});
 
 export type DogProfileRow = typeof dogProfiles.$inferSelect;
 export type DogRecordRow = typeof dogRecords.$inferSelect;

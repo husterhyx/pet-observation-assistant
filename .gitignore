@@ -4,3 +4,6 @@ dist-standalone
 .env
 *.log
 .DS_Store
+.idea/
+data/
+db/generated-migrations/

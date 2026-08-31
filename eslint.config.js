@@ -20,4 +20,11 @@ export default defineConfig([
       globals: globals.browser,
     },
   },
+  {
+    files: ['src/components/ui/**/*.tsx', 'src/providers/trpc.tsx'],
+    rules: {
+      // Shared shadcn variants and hooks are intentionally colocated with components.
+      'react-refresh/only-export-components': 'off',
+    },
+  },
 ])
