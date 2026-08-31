@@ -4,11 +4,11 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "node --use-env-proxy ./node_modules/vite/bin/vite.js",
     "build": "vite build && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --external:better-sqlite3 --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
     "lint": "eslint .",
     "preview": "vite preview",
-    "start": "node dist/boot.js",
+    "start": "node --use-env-proxy dist/boot.js",
     "check": "tsc -b",
     "format": "prettier --write .",
     "test": "vitest run",

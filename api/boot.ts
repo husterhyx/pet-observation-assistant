@@ -96,7 +96,7 @@ if (env.isProduction) {
   const { serve } = await import("@hono/node-server");
   const { serveStaticFiles } = await import("./lib/vite");
   serveStaticFiles(app);
-  serve({ fetch: app.fetch, port: env.port }, () => {
-    console.log(`Server running on http://127.0.0.1:${env.port}/ (${env.appMode})`);
+  serve({ fetch: app.fetch, hostname: env.host, port: env.port }, () => {
+    console.log(`Server running on http://${env.host}:${env.port}/ (${env.appMode})`);
   });
 }

@@ -9,6 +9,7 @@ export const env = {
   dataDir: path.resolve(process.env.DATA_DIR || "./data"),
   deviceApiKey: process.env.DEVICE_API_KEY ?? "",
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "",
+  host: process.env.HOST || "127.0.0.1",
   port: Number.parseInt(process.env.PORT || "3000", 10),
 };
 

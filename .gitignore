@@ -6,4 +6,5 @@ dist-standalone
 .DS_Store
 .idea/
 data/
+deploy/out/
 db/generated-migrations/

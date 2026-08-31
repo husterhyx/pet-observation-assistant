@@ -14,6 +14,15 @@ npm run dev
 
 打开 <http://127.0.0.1:3000/>。本地模式不需要账号、数据库服务或 API 密钥。
 
+如果当前网络需要本地代理才能访问远程同步服务器，只为当前终端设置代理即可；`npm run dev` 和 `npm start` 会让 Node.js 读取这些变量，不会修改 Windows 系统代理：
+
+```powershell
+$env:HTTP_PROXY='http://127.0.0.1:10809'
+$env:HTTPS_PROXY='http://127.0.0.1:10809'
+$env:NO_PROXY='localhost,127.0.0.1,::1'
+npm run dev
+```
+
 默认数据位置：
 
 - SQLite：`data/pet-life.db`
@@ -30,6 +39,7 @@ APP_MODE=server
 DATA_DIR=/var/lib/pet-life
 DEVICE_API_KEY=replace-with-a-random-secret
 PUBLIC_BASE_URL=https://pet.example.com
+HOST=127.0.0.1
 PORT=3000
 ```
 
@@ -48,6 +58,7 @@ Authorization: Bearer <device-key>
 - 冲突采用最后修改覆盖；时间相同则按设备 ID 稳定决胜。
 - 图片压缩到最长边 2048px 后按 SHA-256 存储，SQLite 只保存附件索引。
 - “我的”页面可填写远程 HTTPS 地址和固定设备密钥，并查看待同步数量与最近同步结果。
+- 日常开发连接 `https://yuxiang66.top/pet-dev`；正式使用连接 `https://yuxiang66.top/pet`。两套地址使用不同设备密钥和独立数据库，不要交叉填写。
 
 ## 验证
 
