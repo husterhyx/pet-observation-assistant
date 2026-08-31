@@ -5,13 +5,19 @@ import { createRouter, publicQuery } from "./middleware";
 import { getDb } from "./queries/connection";
 import { dailyPhotos, dogProfiles, dogRecords, supplies } from "@db/schema";
 import { attachmentUrl, persistImage } from "./lib/attachments";
-import { getLocalDeviceId, recordLocalChange } from "./sync/change-store";
+import { getLocalDeviceId, getSetting, recordLocalChange, setSetting } from "./sync/change-store";
 
 const PROFILE_ID = "profile";
 const recordType = z.enum([
   "feed", "water", "walk", "weight", "bath", "groom", "poop",
   "vaccine", "deworm", "checkup", "vet", "meds", "mood", "note", "milestone",
 ]);
+const homeCardType = z.enum([
+  "walk", "weight", "bath", "groom", "vaccine", "deworm",
+  "checkup", "vet", "meds", "mood", "note", "milestone",
+]);
+const DEFAULT_HOME_CARDS = ["walk", "weight", "deworm", "vaccine", "checkup", "milestone"] as const;
+const HOME_CARDS_SETTING = "homeCardTypes";
 
 const profileInput = z.object({
   name: z.string().max(100),
@@ -24,6 +30,24 @@ const profileInput = z.object({
 });
 
 export const petRouter = createRouter({
+  getHomeCards: publicQuery.query(async () => {
+    const stored = await getSetting(HOME_CARDS_SETTING);
+    if (!stored) return [...DEFAULT_HOME_CARDS];
+    try {
+      const parsed = z.array(homeCardType).min(1).safeParse(JSON.parse(stored));
+      return parsed.success ? [...new Set(parsed.data)] : [...DEFAULT_HOME_CARDS];
+    } catch {
+      return [...DEFAULT_HOME_CARDS];
+    }
+  }),
+
+  saveHomeCards: publicQuery
+    .input(z.array(homeCardType).min(1).max(12).refine(items => new Set(items).size === items.length, "卡片不能重复"))
+    .mutation(async ({ input }) => {
+      await setSetting(HOME_CARDS_SETTING, JSON.stringify(input));
+      return input;
+    }),
+
   getProfile: publicQuery.query(async () => {
     const row = await getDb().query.dogProfiles.findFirst({
       where: and(eq(dogProfiles.id, PROFILE_ID), isNull(dogProfiles.deletedAt)),

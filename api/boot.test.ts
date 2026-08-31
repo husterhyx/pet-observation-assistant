@@ -68,4 +68,12 @@ describe("local SQLite backend", () => {
     expect(response.status).toBe(200);
     expect(response.headers.get("content-type")).toBe("image/png");
   });
+
+  it("persists the selected home cards in SQLite", async () => {
+    expect(await caller.pet.getHomeCards()).toEqual([
+      "walk", "weight", "deworm", "vaccine", "checkup", "milestone",
+    ]);
+    await caller.pet.saveHomeCards(["weight", "bath", "vet"]);
+    expect(await caller.pet.getHomeCards()).toEqual(["weight", "bath", "vet"]);
+  });
 });

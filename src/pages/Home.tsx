@@ -1,9 +1,19 @@
 import { useMemo, useRef, useState } from 'react'
 import {
+  DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter,
+  useSensor, useSensors, type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
   Bone, Droplets, Footprints, Bath, Scissors, Bean, Scale, Syringe, Bug,
   HeartPulse, Stethoscope, Pill, Smile, NotebookPen, Flag, Plus, Trash2,
   Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap,
-  Cloud, RefreshCw, Server, CheckCircle2, AlertCircle,
+  Cloud, RefreshCw, Server, CheckCircle2, AlertCircle, ImagePlus, SlidersHorizontal,
+  GripVertical,
 } from 'lucide-react'
 import { useDogData } from '@/hooks/useDogData'
 import { useSync } from '@/hooks/useSync'
@@ -51,16 +61,27 @@ const TYPE_COLOR: Record<RecordType, string> = {
 
 /** 一键打卡：点一下立刻记一条 */
 const QUICK_TYPES: RecordType[] = ['feed', 'water', 'walk', 'poop']
+type HomeCardType = Exclude<RecordType, 'feed' | 'water' | 'poop'>
 
 /** 需要填写详情才能形成有效统计的记录入口 */
-const DETAIL_ENTRIES: { type: RecordType; label: string }[] = [
+const HOME_CARD_OPTIONS: { type: HomeCardType; label: string }[] = [
   { type: 'walk', label: '遛弯时长' },
   { type: 'weight', label: '体重趋势' },
+  { type: 'bath', label: '洗澡' },
+  { type: 'groom', label: '美容' },
   { type: 'deworm', label: '驱虫' },
   { type: 'vaccine', label: '疫苗' },
   { type: 'checkup', label: '体检' },
+  { type: 'vet', label: '就医' },
+  { type: 'meds', label: '用药' },
+  { type: 'mood', label: '心情' },
+  { type: 'note', label: '随手记' },
   { type: 'milestone', label: '大事件' },
 ]
+
+function homeCardOption(type: HomeCardType) {
+  return HOME_CARD_OPTIONS.find(option => option.type === type)!
+}
 
 type Tab = 'diary' | 'photos' | 'supplies' | 'me'
 
@@ -99,7 +120,7 @@ function daysTogether(homeDate: string) {
   return days >= 0 ? `相伴第 ${days + 1} 天` : ''
 }
 
-function readImage(f: File | undefined, cb: (dataUrl: string) => void) {
+function readImage(f: File | undefined, cb: (dataUrl: string) => void, onError?: () => void) {
   if (!f) return
   const image = new Image()
   const objectUrl = URL.createObjectURL(f)
@@ -112,7 +133,10 @@ function readImage(f: File | undefined, cb: (dataUrl: string) => void) {
     URL.revokeObjectURL(objectUrl)
     cb(canvas.toDataURL('image/jpeg', 0.82))
   }
-  image.onerror = () => URL.revokeObjectURL(objectUrl)
+  image.onerror = () => {
+    URL.revokeObjectURL(objectUrl)
+    onError?.()
+  }
   image.src = objectUrl
 }
 
@@ -135,6 +159,7 @@ function MainApp() {
   const [tab, setTab] = useState<Tab>('diary')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetType, setSheetType] = useState<RecordType>('feed')
+  const [cardsEditorOpen, setCardsEditorOpen] = useState(false)
 
   const openRecordSheet = (type: RecordType = 'feed') => {
     setSheetType(type)
@@ -158,6 +183,8 @@ function MainApp() {
                 time: new Date().toISOString(),
               })}
               onDetailed={openRecordSheet}
+              cards={data.homeCardTypes}
+              onEditCards={() => setCardsEditorOpen(true)}
             />
             <Timeline records={data.records} onDelete={data.removeRecord} />
           </>
@@ -216,6 +243,16 @@ function MainApp() {
             onSubmit={r => { data.addRecord(r); setSheetOpen(false); setTab('diary') }}
           />
         )}
+        {cardsEditorOpen && (
+          <HomeCardsEditor
+            selected={data.homeCardTypes}
+            onClose={() => setCardsEditorOpen(false)}
+            onSave={async types => {
+              await data.setHomeCards(types)
+              setCardsEditorOpen(false)
+            }}
+          />
+        )}
       </div>
     </div>
   )
@@ -259,9 +296,11 @@ function Header({ profile, recordCount }: { profile: DogProfile; recordCount: nu
 
 /* ---------------- 一键打卡 ---------------- */
 
-function QuickRecord({ onQuick, onDetailed }: {
+function QuickRecord({ onQuick, onDetailed, cards, onEditCards }: {
   onQuick: (t: RecordType) => void
   onDetailed: (t: RecordType) => void
+  cards: HomeCardType[]
+  onEditCards: () => void
 }) {
   const [done, setDone] = useState<RecordType | null>(null)
   return (
@@ -293,9 +332,19 @@ function QuickRecord({ onQuick, onDetailed }: {
           })}
         </div>
         <div className="h-px bg-[#264653]/8 my-3" />
-        <h3 className="text-xs font-semibold text-[#264653]/50 mb-2.5">健康与成长</h3>
+        <div className="flex items-center justify-between mb-2.5">
+          <h3 className="text-xs font-semibold text-[#264653]/50">健康与成长</h3>
+          <button
+            type="button"
+            onClick={onEditCards}
+            className="flex items-center gap-1 text-[11px] font-semibold text-[#C76E2B] px-2 py-1 rounded-full bg-[#F4A261]/12"
+          >
+            <SlidersHorizontal size={12} /> 编辑
+          </button>
+        </div>
         <div className="grid grid-cols-3 gap-2">
-          {DETAIL_ENTRIES.map(({ type, label }) => {
+          {cards.map(type => {
+            const { label } = homeCardOption(type)
             const Icon = TYPE_ICON[type]
             return (
               <button
@@ -523,7 +572,7 @@ function AddSheet({ initialType, defaultName, onClose, onSubmit }: {
 function DailyPhotos({ photos, dogName, onSave, onDelete }: {
   photos: DailyPhoto[]
   dogName: string
-  onSave: (date: string, photo: string, caption: string) => void
+  onSave: (date: string, photo: string, caption: string) => Promise<void>
   onDelete: (id: string) => void
 }) {
   const today = todayKey()
@@ -532,12 +581,52 @@ function DailyPhotos({ photos, dogName, onSave, onDelete }: {
   const [draft, setDraft] = useState<string | undefined>()
   const [caption, setCaption] = useState('')
   const [editing, setEditing] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [preparing, setPreparing] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const galleryRef = useRef<HTMLInputElement>(null)
+  const cameraRef = useRef<HTMLInputElement>(null)
+  const busy = preparing || saving
 
   const startEdit = () => {
     setDraft(todayPhoto?.photo)
     setCaption(todayPhoto?.caption ?? '')
     setEditing(true)
+  }
+
+  const savePhoto = async () => {
+    if (!draft || busy) return
+    setSaving(true)
+    setSaveError('')
+    try {
+      await Promise.all([
+        onSave(today, draft, caption.trim()),
+        new Promise(resolve => window.setTimeout(resolve, 500)),
+      ])
+      setEditing(false)
+      setDraft(undefined)
+      setCaption('')
+    } catch {
+      setSaveError('保存失败，请重试')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const preparePhoto = (file: File | undefined) => {
+    if (!file || busy) return
+    const startedAt = Date.now()
+    setPreparing(true)
+    setSaveError('')
+    readImage(file, photo => {
+      window.setTimeout(() => {
+        setDraft(photo)
+        setPreparing(false)
+      }, Math.max(0, 500 - (Date.now() - startedAt)))
+    }, () => {
+      setPreparing(false)
+      setSaveError('无法读取这张照片，请重新选择')
+    })
   }
 
   return (
@@ -560,36 +649,76 @@ function DailyPhotos({ photos, dogName, onSave, onDelete }: {
         </figure>
       ) : (
         <div className="bg-[#FFFDF6] rounded-3xl p-5 shadow-sm shadow-[#264653]/5">
-          <button
-            onClick={() => fileRef.current?.click()}
-            className="w-full aspect-[4/3] rounded-2xl border-2 border-dashed border-[#F4A261]/40 bg-[#F5F0E1]/60 flex flex-col items-center justify-center gap-2 text-[#264653]/50 overflow-hidden"
-          >
+          <div className="relative w-full aspect-[4/3] rounded-2xl border-2 border-dashed border-[#F4A261]/40 bg-[#F5F0E1]/60 flex flex-col items-center justify-center gap-2 text-[#264653]/50 overflow-hidden">
             {draft ? (
-              <img src={draft} alt="" className="w-full h-full object-cover" />
+              <img src={draft} alt="" className={`w-full h-full object-cover transition ${saving ? 'scale-[1.02]' : ''}`} />
             ) : (
               <>
                 <Camera size={32} className="text-[#F4A261]" />
-                <span className="text-sm font-medium">拍下 / 选一张今天的它</span>
+                <span className="text-sm font-medium">拍下或选一张今天的它</span>
               </>
             )}
-          </button>
+            {busy && (
+              <span className="absolute inset-0 bg-[#264653]/45 backdrop-blur-[1px] flex flex-col items-center justify-center gap-2 text-white" aria-live="polite">
+                <RefreshCw size={30} className="animate-spin" />
+                <span className="text-sm font-semibold animate-pulse">{preparing ? '正在处理照片…' : '正在保存照片…'}</span>
+              </span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 gap-2 mt-3">
+            <button
+              type="button"
+              onClick={() => cameraRef.current?.click()}
+              disabled={busy}
+              className="flex items-center justify-center gap-1.5 rounded-2xl py-2.5 text-sm font-semibold bg-[#F4A261]/15 text-[#C76E2B] disabled:opacity-50"
+            >
+              <Camera size={16} /> 拍照
+            </button>
+            <button
+              type="button"
+              onClick={() => galleryRef.current?.click()}
+              disabled={busy}
+              className="flex items-center justify-center gap-1.5 rounded-2xl py-2.5 text-sm font-semibold bg-[#A8DADC]/35 text-[#2A7F83] disabled:opacity-50"
+            >
+              <ImagePlus size={16} /> 从相册选择
+            </button>
+          </div>
           {draft && (
             <div className="mt-3 space-y-2.5">
               <input
                 value={caption}
                 onChange={e => setCaption(e.target.value)}
+                disabled={busy}
                 placeholder="给今天配一句话…"
-                className="w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40"
+                className="w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40 disabled:opacity-60"
               />
               <button
-                onClick={() => { onSave(today, draft, caption.trim()); setEditing(false); setDraft(undefined); setCaption('') }}
-                className="w-full bg-[#F4A261] text-white font-bold rounded-2xl py-3 active:scale-[0.98] transition"
+                onClick={savePhoto}
+                disabled={busy}
+                className="w-full bg-[#F4A261] text-white font-bold rounded-2xl py-3 active:enabled:scale-[0.98] transition disabled:opacity-80 flex items-center justify-center gap-2"
               >
-                收下今日份的可爱
+                {saving && <RefreshCw size={17} className="animate-spin" />}
+                {saving ? '正在保存照片…' : '收下今日份的可爱'}
               </button>
+              {saveError && <p className="text-xs text-center text-[#C0452B]" role="alert">{saveError}</p>}
             </div>
           )}
-          <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => readImage(e.target.files?.[0], setDraft)} />
+          {!draft && saveError && <p className="text-xs text-center text-[#C0452B] mt-3" role="alert">{saveError}</p>}
+          <input
+            ref={cameraRef}
+            type="file"
+            accept="image/*"
+            capture="environment"
+            className="hidden"
+            onChange={e => { preparePhoto(e.target.files?.[0]); e.currentTarget.value = '' }}
+          />
+          <input
+            ref={galleryRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={e => { preparePhoto(e.target.files?.[0]); e.currentTarget.value = '' }}
+          />
         </div>
       )}
 
@@ -1006,6 +1135,167 @@ function SyncSettings({ sync }: { sync: ReturnType<typeof useSync> }) {
         数据保存在本机 SQLite；远程连接只接受 HTTPS
       </p>
     </section>
+  )
+}
+
+function HomeCardsEditor({ selected, onClose, onSave }: {
+  selected: HomeCardType[]
+  onClose: () => void
+  onSave: (types: HomeCardType[]) => Promise<unknown>
+}) {
+  const [draft, setDraft] = useState<HomeCardType[]>(selected)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  const toggle = (type: HomeCardType) => {
+    setError('')
+    setDraft(current => current.includes(type)
+      ? current.filter(item => item !== type)
+      : [...current, type])
+  }
+
+  const submit = async () => {
+    if (draft.length === 0) {
+      setError('请至少保留一个主页卡片')
+      return
+    }
+    setSaving(true)
+    setError('')
+    try {
+      await onSave(draft)
+    } catch {
+      setError('保存失败，请重试')
+      setSaving(false)
+    }
+  }
+
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+    setDraft(current => {
+      const from = current.indexOf(active.id as HomeCardType)
+      const to = current.indexOf(over.id as HomeCardType)
+      return from >= 0 && to >= 0 ? arrayMove(current, from, to) : current
+    })
+  }
+
+  const available = HOME_CARD_OPTIONS.filter(option => !draft.includes(option.type))
+
+  return (
+    <div className="fixed inset-0 z-40 flex items-end justify-center" onClick={saving ? undefined : onClose}>
+      <div className="absolute inset-0 bg-[#264653]/40" />
+      <section
+        className="relative w-full max-w-md bg-[#FFFDF6] rounded-t-[2rem] p-5 pb-8 max-h-[85dvh] overflow-y-auto"
+        onClick={event => event.stopPropagation()}
+        aria-labelledby="home-cards-title"
+      >
+        <div className="flex items-center justify-between gap-3 mb-1">
+          <h2 id="home-cards-title" className="text-lg font-bold">编辑主页卡片</h2>
+          <button type="button" onClick={onClose} disabled={saving} aria-label="关闭" className="text-[#264653]/40 disabled:opacity-40">
+            <X size={22} />
+          </button>
+        </div>
+        <p className="text-xs text-[#264653]/50 mb-4">拖动已选卡片调整主页顺序，也可以添加或移除项目</p>
+
+        <h3 className="text-xs font-semibold text-[#264653]/55 mb-2">主页显示 · {draft.length} 项</h3>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={draft} strategy={verticalListSortingStrategy}>
+            <div className="space-y-2">
+              {draft.map(type => (
+                <SortableHomeCard
+                  key={type}
+                  type={type}
+                  disabled={saving}
+                  onRemove={() => toggle(type)}
+                />
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+
+        {available.length > 0 && (
+          <div className="mt-5">
+            <h3 className="text-xs font-semibold text-[#264653]/55 mb-2">添加其他卡片</h3>
+            <div className="grid grid-cols-2 gap-2">
+              {available.map(({ type, label }) => {
+                const Icon = TYPE_ICON[type]
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => toggle(type)}
+                    disabled={saving}
+                    className="flex items-center gap-2 rounded-2xl px-3 py-2.5 text-sm text-left bg-[#F5F0E1] text-[#264653]/65 disabled:opacity-50"
+                  >
+                    <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${TYPE_COLOR[type]}`}>
+                      <Icon size={15} />
+                    </span>
+                    <span className="flex-1 font-medium">{label}</span>
+                    <Plus size={14} />
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+        {error && <p className="text-xs text-[#C0452B] mt-2" role="alert">{error}</p>}
+        <button
+          type="button"
+          onClick={submit}
+          disabled={saving}
+          className="w-full mt-4 bg-[#F4A261] text-white font-bold rounded-2xl py-3.5 disabled:opacity-60 flex items-center justify-center gap-2"
+        >
+          {saving && <RefreshCw size={17} className="animate-spin" />}
+          {saving ? '正在保存…' : '保存主页设置'}
+        </button>
+      </section>
+    </div>
+  )
+}
+
+function SortableHomeCard({ type, disabled, onRemove }: {
+  type: HomeCardType
+  disabled: boolean
+  onRemove: () => void
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: type, disabled })
+  const { label } = homeCardOption(type)
+  const Icon = TYPE_ICON[type]
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined }}
+      className={`flex items-center gap-2 rounded-2xl px-2.5 py-2 bg-[#F4A261]/12 border border-[#F4A261]/45 ${isDragging ? 'shadow-lg opacity-95' : ''}`}
+    >
+      <button
+        type="button"
+        aria-label={`拖动${label}`}
+        disabled={disabled}
+        className="p-1.5 text-[#264653]/35 cursor-grab active:cursor-grabbing touch-none disabled:opacity-40"
+        {...attributes}
+        {...listeners}
+      >
+        <GripVertical size={18} />
+      </button>
+      <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${TYPE_COLOR[type]}`}>
+        <Icon size={17} />
+      </span>
+      <span className="flex-1 text-sm font-medium">{label}</span>
+      <button
+        type="button"
+        aria-label={`移除${label}`}
+        onClick={onRemove}
+        disabled={disabled}
+        className="p-2 text-[#264653]/35 hover:text-[#C0452B] disabled:opacity-40"
+      >
+        <X size={16} />
+      </button>
+    </div>
   )
 }
 
