@@ -1,7 +1,9 @@
 import { useEffect, useRef } from "react";
 import { trpc } from "@/providers/trpc";
+import { isTauri } from "@tauri-apps/api/core";
+import { useNativeSync } from "./useNativeSync";
 
-export function useSync() {
+function useWebSync() {
   const utils = trpc.useUtils();
   const statusQ = trpc.sync.status.useQuery(undefined, { refetchInterval: 30_000 });
   const runM = trpc.sync.run.useMutation({
@@ -48,3 +50,5 @@ export function useSync() {
     syncError: runM.error?.message ?? statusQ.data?.lastError ?? null,
   };
 }
+
+export const useSync = isTauri() ? useNativeSync : useWebSync;

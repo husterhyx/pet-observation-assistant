@@ -1,12 +1,14 @@
 import { trpc } from "@/providers/trpc";
 import { useRef } from "react";
 import type { DailyPhoto, DogProfile, DogRecord, RecordType, StockLevel, SupplyItem } from "@/types";
+import { isTauri } from "@tauri-apps/api/core";
+import { useNativeDogData } from "./useNativeDogData";
 
 const DEFAULT_PROFILE: DogProfile = {
   name: "", breed: "", birthday: "", homeDate: "", gender: "boy", neutered: "",
 };
 
-export function useDogData() {
+function useWebDogData() {
   const utils = trpc.useUtils();
   const syncTimer = useRef<number | null>(null);
   const recordsQ = trpc.pet.listRecords.useQuery();
@@ -68,3 +70,5 @@ export function useDogData() {
     setHomeCards: (types: Parameters<typeof saveHomeCardsM.mutateAsync>[0]) => saveHomeCardsM.mutateAsync(types),
   };
 }
+
+export const useDogData = isTauri() ? useNativeDogData : useWebDogData;

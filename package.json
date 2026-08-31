@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node --use-env-proxy ./node_modules/vite/bin/vite.js",
+    "build:web": "vite build",
     "build": "vite build && esbuild api/boot.ts --platform=node --bundle --format=esm --outdir=dist --external:better-sqlite3 --banner:js=\"import { createRequire } from 'module';const require = createRequire(import.meta.url);\"",
     "lint": "eslint .",
     "preview": "vite preview",
@@ -12,7 +13,12 @@
     "check": "tsc -b",
     "format": "prettier --write .",
     "test": "vitest run",
-    "db:generate": "drizzle-kit generate"
+    "db:generate": "drizzle-kit generate",
+    "tauri": "tauri",
+    "android:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action doctor",
+    "android:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action init",
+    "android:build:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action build-debug",
+    "android:build:emulator": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action build-emulator"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -47,6 +53,9 @@
     "@radix-ui/react-toggle-group": "^1.1.11",
     "@radix-ui/react-tooltip": "^1.2.8",
     "@tanstack/react-query": "^5.90.16",
+    "@tauri-apps/api": "^2.11.1",
+    "@tauri-apps/plugin-http": "^2.5.9",
+    "@tauri-apps/plugin-sql": "^2.4.0",
     "@trpc/client": "^11.8.1",
     "@trpc/react-query": "^11.8.1",
     "@trpc/server": "^11.8.1",
@@ -79,6 +88,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@hono/vite-dev-server": "^0.19.0",
+    "@tauri-apps/cli": "^2.11.4",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^24.10.1",
     "@types/react": "^19.2.5",

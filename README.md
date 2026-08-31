@@ -69,3 +69,25 @@ npm run lint
 npm run build
 npm start
 ```
+
+## Android 开发构建
+
+Android 工具链固定使用 D 盘现有环境：
+
+- SDK：`D:\Android\Sdk`
+- NDK：`D:\Android\Sdk\ndk\29.0.13846066`
+- AVD：`D:\Android\Avd`
+- Gradle 缓存：`D:\Android\GradleCache`
+- 纯英文构建目录：`D:\Android\Build\pet-observation`
+- JDK：Microsoft OpenJDK 17
+
+```powershell
+npm run android:doctor
+npm run android:init
+npm run android:build:debug
+npm run android:build:emulator
+```
+
+真机使用的 ARM64 Debug APK 输出到 `dist/android/pet-observation-0.1.0-arm64-debug.apk`；模拟器使用的 x86_64 Debug APK 输出到 `dist/android/pet-observation-0.1.0-x86_64-debug.apk`。构建脚本只设置当前进程的 Android 和代理环境变量，不修改 Windows 系统配置；同时使用英文构建副本规避 NDK/Gradle 对中文路径及 Windows 符号链接的限制。
+
+Android 包内的数据读写已经切换到 Tauri SQLite，本地业务写入与同步 outbox 在同一事务中提交；网页开发环境仍使用 Hono/tRPC。Android 端远程同步使用 Tauri 原生 HTTPS，不依赖 WebView 跨域能力。首次安装后可完全离线记录，之后在“我的”页面配置开发或正式服务器地址和对应密钥。

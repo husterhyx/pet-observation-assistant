@@ -1,62 +1,14 @@
-import { z } from "zod";
 import type { SyncChange } from "@contracts/sync";
+import { entitySql, syncRowSchemas } from "@contracts/entities";
 import { getSqlite } from "../queries/connection";
 import { isIncomingNewer } from "./change-store";
-
-const syncFields = {
-  updatedAt: z.string().datetime(),
-  modifiedByDeviceId: z.string().min(1),
-  deletedAt: z.string().datetime().nullable(),
-};
-
-const rowSchemas = {
-  profile: z.object({
-    id: z.literal("profile"), name: z.string(), breed: z.string(), birthday: z.string(),
-    homeDate: z.string(), gender: z.enum(["boy", "girl"]), neutered: z.enum(["", "yes", "no"]),
-    avatarAttachmentId: z.string().nullable(), ...syncFields,
-  }),
-  record: z.object({
-    id: z.string().uuid(), type: z.string(), title: z.string(), note: z.string(), time: z.string(),
-    value: z.number().nullable(), photoAttachmentId: z.string().nullable(), createdAt: z.string().datetime(),
-    ...syncFields,
-  }),
-  dailyPhoto: z.object({
-    id: z.string().uuid(), date: z.string(), photoAttachmentId: z.string(), caption: z.string(),
-    createdAt: z.string().datetime(), ...syncFields,
-  }),
-  supply: z.object({
-    id: z.string().uuid(), name: z.string(), brand: z.string(), variant: z.string(), category: z.string(),
-    stock: z.enum(["plenty", "low", "empty"]), photoAttachmentId: z.string().nullable(),
-    produceDate: z.string().nullable(), shelfMonths: z.number().int().nullable(), note: z.string(),
-    ...syncFields,
-  }),
-} as const;
-
-const entitySql = {
-  profile: {
-    table: "dog_profiles",
-    columns: ["id", "name", "breed", "birthday", "homeDate", "gender", "neutered", "avatarAttachmentId", "updatedAt", "modifiedByDeviceId", "deletedAt"],
-  },
-  record: {
-    table: "dog_records",
-    columns: ["id", "type", "title", "note", "time", "value", "photoAttachmentId", "createdAt", "updatedAt", "modifiedByDeviceId", "deletedAt"],
-  },
-  dailyPhoto: {
-    table: "daily_photos",
-    columns: ["id", "date", "photoAttachmentId", "caption", "createdAt", "updatedAt", "modifiedByDeviceId", "deletedAt"],
-  },
-  supply: {
-    table: "supplies",
-    columns: ["id", "name", "brand", "variant", "category", "stock", "photoAttachmentId", "produceDate", "shelfMonths", "note", "updatedAt", "modifiedByDeviceId", "deletedAt"],
-  },
-} as const;
 
 export function applyIncomingChange(change: SyncChange) {
   const sqlite = getSqlite();
   const duplicate = sqlite.prepare("SELECT 1 FROM change_log WHERE changeId = ?").get(change.changeId);
   if (duplicate) return false;
 
-  const row = rowSchemas[change.entityType].parse(change.payload) as Record<string, unknown>;
+  const row = syncRowSchemas[change.entityType].parse(change.payload) as Record<string, unknown>;
   const config = entitySql[change.entityType];
   const current = (change.entityType === "dailyPhoto"
     ? sqlite.prepare(`SELECT id, updatedAt, modifiedByDeviceId FROM ${config.table} WHERE id = ? OR date = ?`)
