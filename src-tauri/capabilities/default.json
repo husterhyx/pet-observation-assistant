@@ -10,7 +10,8 @@
     {
       "identifier": "http:default",
       "allow": [
-        { "url": "https://yuxiang66.top/**" }
+        { "url": "https://yuxiang66.top/**" },
+        { "url": "https://pet-api.yuxiang66.top:8443/**" }
       ]
     },
     "sql:default",

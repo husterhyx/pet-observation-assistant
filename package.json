@@ -1,7 +1,7 @@
 {
   "name": "pet-observation-assistant",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.0",
   "type": "module",
   "scripts": {
     "dev": "node --use-env-proxy ./node_modules/vite/bin/vite.js",
@@ -18,7 +18,8 @@
     "android:doctor": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action doctor",
     "android:init": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action init",
     "android:build:debug": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action build-debug",
-    "android:build:emulator": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action build-emulator"
+    "android:build:emulator": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action build-emulator",
+    "android:build:release": "powershell -NoProfile -ExecutionPolicy Bypass -File scripts/android.ps1 -Action build-release"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",

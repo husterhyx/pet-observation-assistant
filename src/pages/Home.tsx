@@ -1390,88 +1390,143 @@ function WeightChart({ data }: { data: DogRecord[] }) {
 
 function ProfilePage({ profile, onSave }: { profile: DogProfile; onSave: (p: DogProfile) => void }) {
   const [draft, setDraft] = useState(profile)
+  const [editing, setEditing] = useState(false)
   const [saved, setSaved] = useState(false)
   const fileRef = useRef<HTMLInputElement>(null)
 
-  const field = 'mt-1 w-full bg-[#FFFDF6] border border-[#264653]/10 rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40'
+  const field = 'mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40'
+  const genderLabel = profile.gender === 'girl' ? '妹妹' : '弟弟'
+  const neuteredLabel = profile.neutered === 'yes' ? '已绝育' : '未绝育'
+
+  const startEditing = () => {
+    setDraft(profile)
+    setSaved(false)
+    setEditing(true)
+  }
+
+  const cancelEditing = () => {
+    setDraft(profile)
+    setEditing(false)
+  }
+
+  const saveProfile = () => {
+    onSave(draft)
+    setEditing(false)
+    setSaved(true)
+    setTimeout(() => setSaved(false), 1500)
+  }
 
   return (
-    <div className="px-5 space-y-5">
-      <div className="flex flex-col items-center pt-2">
-        <button onClick={() => fileRef.current?.click()} className="relative">
-          <div className="w-24 h-24 rounded-full bg-[#E8DCC4] flex items-center justify-center overflow-hidden">
-            {draft.avatar
-              ? <img src={draft.avatar} alt="" className="w-full h-full object-cover" />
-              : <Dog size={40} className="text-[#264653]/50" />}
+    <div className="px-5 space-y-3">
+      <article className="relative overflow-hidden rounded-[2rem] bg-[#FFFDF6] p-4 shadow-sm shadow-[#264653]/5">
+        <div className="absolute -right-10 -top-12 h-32 w-32 rounded-full bg-[#A8DADC]/20" />
+        <div className="relative flex items-center gap-4">
+          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-3xl bg-[#E8DCC4] flex items-center justify-center">
+            {profile.avatar
+              ? <img src={profile.avatar} alt={profile.name || '狗狗头像'} className="h-full w-full object-cover" />
+              : <Dog size={34} className="text-[#264653]/50" />}
           </div>
-          <span className="absolute bottom-0 right-0 w-8 h-8 rounded-full bg-[#F4A261] text-white flex items-center justify-center">
-            <Pencil size={14} />
-          </span>
-        </button>
-        <input ref={fileRef} type="file" accept="image/*" className="hidden"
-          onChange={e => readImage(e.target.files?.[0], url => setDraft(d => ({ ...d, avatar: url })))} />
-      </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <h2 className="truncate text-xl font-bold">{profile.name || '给它起个名字吧'}</h2>
+                <p className="mt-0.5 truncate text-sm text-[#264653]/50">{profile.breed || '等待填写品种'}</p>
+              </div>
+              <button
+                type="button"
+                onClick={startEditing}
+                className="flex shrink-0 items-center gap-1 rounded-full bg-[#F4A261]/15 px-3 py-1.5 text-xs font-semibold text-[#C76E2B] active:scale-95 transition"
+              >
+                <Pencil size={12} /> {saved ? '已保存' : '编辑'}
+              </button>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-[#264653]/65">
+              <span className="rounded-full bg-[#F5F0E1] px-2.5 py-1">{genderLabel}</span>
+              <span className="rounded-full bg-[#F5F0E1] px-2.5 py-1">{neuteredLabel}</span>
+            </div>
+          </div>
+        </div>
+        {(profile.birthday || profile.homeDate) && (
+          <div className="relative mt-4 grid grid-cols-2 gap-2 border-t border-[#264653]/8 pt-3 text-xs text-[#264653]/60">
+            <span className="flex items-center gap-1.5">
+              <Cake size={13} className="text-[#F4A261]" />
+              {profile.birthday ? calcAge(profile.birthday) : '生日待填写'}
+            </span>
+            <span className="flex items-center gap-1.5">
+              <PawPrint size={13} className="text-[#2A7F83]" />
+              {profile.homeDate ? daysTogether(profile.homeDate) : '到家日待填写'}
+            </span>
+          </div>
+        )}
+      </article>
 
-      <label className="block">
-        <span className="text-xs text-[#264653]/50">名字</span>
-        <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="它叫什么？" className={field} />
-      </label>
-      <label className="block">
-        <span className="text-xs text-[#264653]/50">品种</span>
-        <input value={draft.breed} onChange={e => setDraft(d => ({ ...d, breed: e.target.value }))} placeholder="比如：柯基 / 金毛 / 小土狗" className={field} />
-      </label>
-      <div className="grid grid-cols-2 gap-2">
-        <label className="block">
-          <span className="text-xs text-[#264653]/50">生日</span>
-          <input type="date" value={draft.birthday} onChange={e => setDraft(d => ({ ...d, birthday: e.target.value }))} className={field} />
-        </label>
-        <label className="block">
-          <span className="text-xs text-[#264653]/50">到家日</span>
-          <input type="date" value={draft.homeDate} onChange={e => setDraft(d => ({ ...d, homeDate: e.target.value }))} className={field} />
-        </label>
-      </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div>
-          <span className="text-xs text-[#264653]/50">性别</span>
-          <div className="grid grid-cols-2 gap-1.5 mt-1">
-            {(['boy', 'girl'] as const).map(g => (
-              <button
-                key={g}
-                onClick={() => setDraft(d => ({ ...d, gender: g }))}
-                className={`rounded-2xl py-2.5 text-sm transition ${draft.gender === g ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#FFFDF6] border border-[#264653]/10'}`}
-              >
-                {g === 'boy' ? '弟弟' : '妹妹'}
-              </button>
-            ))}
+      {editing && (
+        <section className="rounded-[2rem] bg-[#FFFDF6] p-4 shadow-sm shadow-[#264653]/5 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-bold">编辑名片</h3>
+              <p className="text-[11px] text-[#264653]/45">完善一次，平时保持清爽</p>
+            </div>
+            <button type="button" onClick={cancelEditing} className="rounded-full p-2 text-[#264653]/40" aria-label="取消编辑">
+              <X size={18} />
+            </button>
           </div>
-        </div>
-        <div>
-          <span className="text-xs text-[#264653]/50">是否绝育</span>
-          <div className="grid grid-cols-2 gap-1.5 mt-1">
-            {([['yes', '已绝育'], ['no', '未绝育']] as const).map(([v, label]) => (
-              <button
-                key={v}
-                onClick={() => setDraft(d => ({ ...d, neutered: v }))}
-                className={`rounded-2xl py-2.5 text-sm transition ${draft.neutered === v ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#FFFDF6] border border-[#264653]/10'}`}
-              >
-                {label}
-              </button>
-            ))}
+
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={() => fileRef.current?.click()} className="relative shrink-0">
+              <div className="h-16 w-16 overflow-hidden rounded-2xl bg-[#E8DCC4] flex items-center justify-center">
+                {draft.avatar
+                  ? <img src={draft.avatar} alt="" className="h-full w-full object-cover" />
+                  : <Dog size={28} className="text-[#264653]/50" />}
+              </div>
+              <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-[#F4A261] text-white">
+                <Camera size={12} />
+              </span>
+            </button>
+            <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
+              <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="名字" aria-label="名字" className={field} />
+              <input value={draft.breed} onChange={e => setDraft(d => ({ ...d, breed: e.target.value }))} placeholder="品种" aria-label="品种" className={field} />
+            </div>
+            <input ref={fileRef} type="file" accept="image/*" className="hidden"
+              onChange={e => readImage(e.target.files?.[0], url => setDraft(d => ({ ...d, avatar: url })))} />
           </div>
-        </div>
-      </div>
-      {(draft.birthday || draft.homeDate) && (
-        <p className="text-sm text-[#264653]/60 flex flex-wrap items-center gap-x-3 gap-y-1">
-          {draft.birthday && <span className="flex items-center gap-1.5"><Cake size={14} /> 现在 {calcAge(draft.birthday)}啦</span>}
-          {draft.homeDate && <span className="flex items-center gap-1.5"><PawPrint size={14} /> {daysTogether(draft.homeDate)}</span>}
-        </p>
+
+          <div className="grid grid-cols-2 gap-2">
+            <label className="block">
+              <span className="text-[11px] text-[#264653]/50">生日</span>
+              <input type="date" value={draft.birthday} onChange={e => setDraft(d => ({ ...d, birthday: e.target.value }))} className={field} />
+            </label>
+            <label className="block">
+              <span className="text-[11px] text-[#264653]/50">到家日</span>
+              <input type="date" value={draft.homeDate} onChange={e => setDraft(d => ({ ...d, homeDate: e.target.value }))} className={field} />
+            </label>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-1.5">
+              {(['boy', 'girl'] as const).map(g => (
+                <button type="button" key={g} onClick={() => setDraft(d => ({ ...d, gender: g }))}
+                  className={`rounded-2xl py-2 text-xs transition ${draft.gender === g ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/65'}`}>
+                  {g === 'boy' ? '弟弟' : '妹妹'}
+                </button>
+              ))}
+            </div>
+            <div className="grid grid-cols-2 gap-1.5">
+              {([['yes', '已绝育'], ['no', '未绝育']] as const).map(([v, label]) => (
+                <button type="button" key={v} onClick={() => setDraft(d => ({ ...d, neutered: v }))}
+                  className={`rounded-2xl py-2 text-xs transition ${draft.neutered === v ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/65'}`}>
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2 pt-1">
+            <button type="button" onClick={cancelEditing} className="rounded-2xl bg-[#F5F0E1] py-2.5 text-sm font-semibold text-[#264653]/65">取消</button>
+            <button type="button" onClick={saveProfile} className="rounded-2xl bg-[#F4A261] py-2.5 text-sm font-bold text-white active:scale-[0.98] transition">保存名片</button>
+          </div>
+        </section>
       )}
-      <button
-        onClick={() => { onSave(draft); setSaved(true); setTimeout(() => setSaved(false), 1500) }}
-        className="w-full bg-[#F4A261] text-white font-bold rounded-2xl py-3.5 active:scale-[0.98] transition"
-      >
-        {saved ? '已保存 ✓' : '保存档案'}
-      </button>
     </div>
   )
 }

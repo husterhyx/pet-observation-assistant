@@ -1,6 +1,6 @@
 [package]
 name = "pet-observation-mobile"
-version = "0.1.0"
+version = "1.0.0"
 description = "宠物观察小助手 Android 客户端"
 authors = ["Pet Observation Contributors"]
 license = ""

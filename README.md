@@ -59,6 +59,7 @@ Authorization: Bearer <device-key>
 - 图片压缩到最长边 2048px 后按 SHA-256 存储，SQLite 只保存附件索引。
 - “我的”页面可填写远程 HTTPS 地址和固定设备密钥，并查看待同步数量与最近同步结果。
 - 日常开发连接 `https://yuxiang66.top/pet-dev`；正式使用连接 `https://yuxiang66.top/pet`。两套地址使用不同设备密钥和独立数据库，不要交叉填写。
+- 无代理直连入口使用 `https://pet-api.yuxiang66.top:8443/pet-dev`（开发）和 `https://pet-api.yuxiang66.top:8443/pet`（正式）；仍分别使用对应环境的设备密钥。
 
 ## 验证
 
@@ -86,8 +87,11 @@ npm run android:doctor
 npm run android:init
 npm run android:build:debug
 npm run android:build:emulator
+npm run android:build:release
 ```
 
-真机使用的 ARM64 Debug APK 输出到 `dist/android/pet-observation-0.1.0-arm64-debug.apk`；模拟器使用的 x86_64 Debug APK 输出到 `dist/android/pet-observation-0.1.0-x86_64-debug.apk`。构建脚本只设置当前进程的 Android 和代理环境变量，不修改 Windows 系统配置；同时使用英文构建副本规避 NDK/Gradle 对中文路径及 Windows 符号链接的限制。
+真机调试包输出到 `dist/android/pet-observation-1.0.0-arm64-debug.apk`；模拟器包输出到 `dist/android/pet-observation-1.0.0-x86_64-debug.apk`；正式签名包输出到 `dist/android/pet-observation-1.0.0-arm64-release.apk`。构建脚本会先清理 Gradle 增量产物，并剥离交付 APK 内 Rust 动态库的调试符号；它只设置当前进程的 Android 和代理环境变量，不修改 Windows 系统配置，同时使用英文构建副本规避 NDK/Gradle 对中文路径及 Windows 符号链接的限制。
+
+首次正式构建会在当前 Windows 用户的 `.android` 目录生成本项目独立签名密钥和 DPAPI 加密的密码文件。两者都不会进入 Git；后续发布更新必须使用同一密钥。同机重建需保留两者；DPAPI 文件只能由当前 Windows 用户解密，跨设备灾备还需在当前账户可用时导出密码，并与 JKS 密钥分开保管。
 
 Android 包内的数据读写已经切换到 Tauri SQLite，本地业务写入与同步 outbox 在同一事务中提交；网页开发环境仍使用 Hono/tRPC。Android 端远程同步使用 Tauri 原生 HTTPS，不依赖 WebView 跨域能力。首次安装后可完全离线记录，之后在“我的”页面配置开发或正式服务器地址和对应密钥。
