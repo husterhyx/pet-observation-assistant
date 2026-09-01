@@ -1,6 +1,6 @@
 import { trpc } from "@/providers/trpc";
-import { useRef } from "react";
 import type { DailyPhoto, DogProfile, DogRecord, RecordType, StockLevel, SupplyItem } from "@/types";
+import type { PetBackup } from "@contracts/backup";
 import { isTauri } from "@tauri-apps/api/core";
 import { useNativeDogData } from "./useNativeDogData";
 
@@ -10,7 +10,6 @@ const DEFAULT_PROFILE: DogProfile = {
 
 function useWebDogData() {
   const utils = trpc.useUtils();
-  const syncTimer = useRef<number | null>(null);
   const recordsQ = trpc.pet.listRecords.useQuery();
   const profileQ = trpc.pet.getProfile.useQuery();
   const photosQ = trpc.pet.listPhotos.useQuery();
@@ -24,13 +23,7 @@ function useWebDogData() {
     supplies: () => utils.pet.listSupplies.invalidate(),
   };
 
-  const afterDataChanged = (refresh: () => Promise<unknown>) => async () => {
-    await refresh();
-    if (syncTimer.current !== null) window.clearTimeout(syncTimer.current);
-    syncTimer.current = window.setTimeout(() => {
-      void utils.client.sync.run.mutate().then(() => utils.pet.invalidate()).catch(() => undefined);
-    }, 750);
-  };
+  const afterDataChanged = (refresh: () => Promise<unknown>) => refresh;
 
   const addRecordM = trpc.pet.addRecord.useMutation({ onSuccess: afterDataChanged(invalidate.records) });
   const removeRecordM = trpc.pet.removeRecord.useMutation({ onSuccess: afterDataChanged(invalidate.records) });
@@ -42,6 +35,9 @@ function useWebDogData() {
   const removeSupplyM = trpc.pet.removeSupply.useMutation({ onSuccess: afterDataChanged(invalidate.supplies) });
   const saveHomeCardsM = trpc.pet.saveHomeCards.useMutation({
     onSuccess: () => utils.pet.getHomeCards.invalidate(),
+  });
+  const importBackupM = trpc.pet.importBackup.useMutation({
+    onSuccess: () => utils.pet.invalidate(),
   });
 
   const records: DogRecord[] = (recordsQ.data ?? []).map((row) => ({
@@ -68,6 +64,8 @@ function useWebDogData() {
       updateSupplyM.mutate({ id, stock: patch.stock, note: patch.note }),
     removeSupply: (id: string) => removeSupplyM.mutate({ id }),
     setHomeCards: (types: Parameters<typeof saveHomeCardsM.mutateAsync>[0]) => saveHomeCardsM.mutateAsync(types),
+    createBackup: () => utils.client.pet.exportBackup.query(),
+    restoreBackup: (backup: PetBackup) => importBackupM.mutateAsync(backup),
   };
 }
 

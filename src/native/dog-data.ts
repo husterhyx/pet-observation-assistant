@@ -1,15 +1,16 @@
 import type Database from "@tauri-apps/plugin-sql";
 import type { DailyPhoto, DogProfile, DogRecord, RecordType, StockLevel, SupplyItem } from "@/types";
+import { petBackupSchema, type PetBackup } from "@contracts/backup";
 import {
-  appendLocalChange,
   getAttachmentData,
-  getLocalDeviceId,
   getNativeDatabase,
   getSetting,
   persistNativeImage,
   setSetting,
   withTransaction,
 } from "./database";
+
+const LOCAL_DEVICE_ID = "local";
 
 export type NativeHomeCardType = Exclude<RecordType, "feed" | "water" | "poop">;
 
@@ -121,7 +122,6 @@ export async function getNativeProfile(): Promise<DogProfile | null> {
 export async function saveNativeProfile(input: DogProfile) {
   const db = await getNativeDatabase();
   const current = await selectOne<ProfileRow>(db, "SELECT * FROM dog_profiles WHERE id = 'profile' LIMIT 1");
-  const deviceId = await getLocalDeviceId();
   const now = new Date().toISOString();
   const row: ProfileRow = {
     id: "profile",
@@ -133,7 +133,7 @@ export async function saveNativeProfile(input: DogProfile) {
     neutered: input.neutered,
     avatarAttachmentId: input.avatar ? await persistNativeImage(input.avatar) : current?.avatarAttachmentId ?? null,
     updatedAt: now,
-    modifiedByDeviceId: deviceId,
+    modifiedByDeviceId: LOCAL_DEVICE_ID,
     deletedAt: null,
   };
   await withTransaction(async transaction => {
@@ -148,7 +148,6 @@ export async function saveNativeProfile(input: DogProfile) {
         modifiedByDeviceId=excluded.modifiedByDeviceId, deletedAt=excluded.deletedAt`,
       Object.values(row),
     );
-    await appendLocalChange(transaction, deviceId, "profile", row.id, "upsert", row, now);
   });
 }
 
@@ -169,7 +168,6 @@ export async function listNativeRecords(): Promise<DogRecord[]> {
 }
 
 export async function addNativeRecord(input: Omit<DogRecord, "id">) {
-  const deviceId = await getLocalDeviceId();
   const now = new Date().toISOString();
   const row: RecordRow = {
     id: crypto.randomUUID(),
@@ -181,7 +179,7 @@ export async function addNativeRecord(input: Omit<DogRecord, "id">) {
     photoAttachmentId: await persistNativeImage(input.photo),
     createdAt: now,
     updatedAt: now,
-    modifiedByDeviceId: deviceId,
+    modifiedByDeviceId: LOCAL_DEVICE_ID,
     deletedAt: null,
   };
   await withTransaction(async db => {
@@ -191,24 +189,12 @@ export async function addNativeRecord(input: Omit<DogRecord, "id">) {
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
       Object.values(row),
     );
-    await appendLocalChange(db, deviceId, "record", row.id, "upsert", row, now);
   });
 }
 
 export async function removeNativeRecord(id: string) {
   const db = await getNativeDatabase();
-  const current = await selectOne<RecordRow>(db, "SELECT * FROM dog_records WHERE id = $1", [id]);
-  if (!current) return;
-  const now = new Date().toISOString();
-  const deviceId = await getLocalDeviceId();
-  const row = { ...current, updatedAt: now, modifiedByDeviceId: deviceId, deletedAt: now };
-  await withTransaction(async transaction => {
-    await transaction.execute(
-      "UPDATE dog_records SET updatedAt=$1, modifiedByDeviceId=$2, deletedAt=$3 WHERE id=$4",
-      [now, deviceId, now, id],
-    );
-    await appendLocalChange(transaction, deviceId, "record", id, "delete", row, now);
-  });
+  await db.execute("DELETE FROM dog_records WHERE id = $1", [id]);
 }
 
 export async function listNativePhotos(): Promise<DailyPhoto[]> {
@@ -229,7 +215,6 @@ export async function setNativePhoto(date: string, photo: string, caption: strin
   const db = await getNativeDatabase();
   const existing = await selectOne<PhotoRow>(db, "SELECT * FROM daily_photos WHERE date = $1 LIMIT 1", [date]);
   const now = new Date().toISOString();
-  const deviceId = await getLocalDeviceId();
   const attachmentId = await persistNativeImage(photo);
   if (!attachmentId) throw new Error("Photo is required");
   const row: PhotoRow = {
@@ -239,7 +224,7 @@ export async function setNativePhoto(date: string, photo: string, caption: strin
     caption,
     createdAt: existing?.createdAt ?? now,
     updatedAt: now,
-    modifiedByDeviceId: deviceId,
+    modifiedByDeviceId: LOCAL_DEVICE_ID,
     deletedAt: null,
   };
   await withTransaction(async transaction => {
@@ -252,24 +237,12 @@ export async function setNativePhoto(date: string, photo: string, caption: strin
         modifiedByDeviceId=excluded.modifiedByDeviceId, deletedAt=excluded.deletedAt`,
       Object.values(row),
     );
-    await appendLocalChange(transaction, deviceId, "dailyPhoto", row.id, "upsert", row, now);
   });
 }
 
 export async function removeNativePhoto(id: string) {
   const db = await getNativeDatabase();
-  const current = await selectOne<PhotoRow>(db, "SELECT * FROM daily_photos WHERE id = $1", [id]);
-  if (!current) return;
-  const now = new Date().toISOString();
-  const deviceId = await getLocalDeviceId();
-  const row = { ...current, updatedAt: now, modifiedByDeviceId: deviceId, deletedAt: now };
-  await withTransaction(async transaction => {
-    await transaction.execute(
-      "UPDATE daily_photos SET updatedAt=$1, modifiedByDeviceId=$2, deletedAt=$3 WHERE id=$4",
-      [now, deviceId, now, id],
-    );
-    await appendLocalChange(transaction, deviceId, "dailyPhoto", id, "delete", row, now);
-  });
+  await db.execute("DELETE FROM daily_photos WHERE id = $1", [id]);
 }
 
 export async function listNativeSupplies(): Promise<SupplyItem[]> {
@@ -294,7 +267,6 @@ export async function listNativeSupplies(): Promise<SupplyItem[]> {
 
 export async function addNativeSupply(input: Omit<SupplyItem, "id" | "updatedAt">) {
   const now = new Date().toISOString();
-  const deviceId = await getLocalDeviceId();
   const row: SupplyRow = {
     id: crypto.randomUUID(),
     name: input.name,
@@ -307,7 +279,7 @@ export async function addNativeSupply(input: Omit<SupplyItem, "id" | "updatedAt"
     shelfMonths: input.shelfMonths ?? null,
     note: input.note,
     updatedAt: now,
-    modifiedByDeviceId: deviceId,
+    modifiedByDeviceId: LOCAL_DEVICE_ID,
     deletedAt: null,
   };
   await withTransaction(async db => {
@@ -317,7 +289,6 @@ export async function addNativeSupply(input: Omit<SupplyItem, "id" | "updatedAt"
        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
       Object.values(row),
     );
-    await appendLocalChange(db, deviceId, "supply", row.id, "upsert", row, now);
   });
 }
 
@@ -326,36 +297,107 @@ export async function updateNativeSupply(id: string, patch: Partial<SupplyItem>)
   const current = await selectOne<SupplyRow>(db, "SELECT * FROM supplies WHERE id = $1", [id]);
   if (!current) return;
   const now = new Date().toISOString();
-  const deviceId = await getLocalDeviceId();
   const row: SupplyRow = {
     ...current,
     stock: patch.stock ?? current.stock,
     note: patch.note ?? current.note,
     updatedAt: now,
-    modifiedByDeviceId: deviceId,
+    modifiedByDeviceId: LOCAL_DEVICE_ID,
   };
   await withTransaction(async transaction => {
     await transaction.execute(
       "UPDATE supplies SET stock=$1, note=$2, updatedAt=$3, modifiedByDeviceId=$4 WHERE id=$5",
-      [row.stock, row.note, now, deviceId, id],
+      [row.stock, row.note, now, LOCAL_DEVICE_ID, id],
     );
-    await appendLocalChange(transaction, deviceId, "supply", id, "upsert", row, now);
   });
 }
 
 export async function removeNativeSupply(id: string) {
   const db = await getNativeDatabase();
-  const current = await selectOne<SupplyRow>(db, "SELECT * FROM supplies WHERE id = $1", [id]);
-  if (!current) return;
-  const now = new Date().toISOString();
-  const deviceId = await getLocalDeviceId();
-  const row = { ...current, updatedAt: now, modifiedByDeviceId: deviceId, deletedAt: now };
-  await withTransaction(async transaction => {
-    await transaction.execute(
-      "UPDATE supplies SET updatedAt=$1, modifiedByDeviceId=$2, deletedAt=$3 WHERE id=$4",
-      [now, deviceId, now, id],
-    );
-    await appendLocalChange(transaction, deviceId, "supply", id, "delete", row, now);
+  await db.execute("DELETE FROM supplies WHERE id = $1", [id]);
+}
+
+export async function exportNativeBackup(): Promise<PetBackup> {
+  const [profile, records, photos, supplies, homeCardTypes] = await Promise.all([
+    getNativeProfile(),
+    listNativeRecords(),
+    listNativePhotos(),
+    listNativeSupplies(),
+    getNativeHomeCards(),
+  ]);
+  return petBackupSchema.parse({
+    format: "pet-observation-backup",
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    profile: profile ?? {
+      name: "", breed: "", birthday: "", homeDate: "", gender: "boy", neutered: "",
+    },
+    records,
+    photos,
+    supplies,
+    homeCardTypes,
   });
 }
 
+export async function importNativeBackup(input: PetBackup) {
+  const backup = petBackupSchema.parse(input);
+  const now = new Date().toISOString();
+  const [avatarAttachmentId, recordAttachmentIds, photoAttachmentIds, supplyAttachmentIds] = await Promise.all([
+    persistNativeImage(backup.profile.avatar),
+    Promise.all(backup.records.map(row => persistNativeImage(row.photo))),
+    Promise.all(backup.photos.map(row => persistNativeImage(row.photo))),
+    Promise.all(backup.supplies.map(row => persistNativeImage(row.photo))),
+  ]);
+
+  await withTransaction(async db => {
+    await db.execute("DELETE FROM dog_records");
+    await db.execute("DELETE FROM daily_photos");
+    await db.execute("DELETE FROM supplies");
+    await db.execute("DELETE FROM dog_profiles");
+    await db.execute(
+      `INSERT INTO dog_profiles
+        (id,name,breed,birthday,homeDate,gender,neutered,avatarAttachmentId,updatedAt,modifiedByDeviceId,deletedAt)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULL)`,
+      ["profile", backup.profile.name, backup.profile.breed, backup.profile.birthday,
+        backup.profile.homeDate, backup.profile.gender, backup.profile.neutered,
+        avatarAttachmentId, now, LOCAL_DEVICE_ID],
+    );
+    for (const [index, row] of backup.records.entries()) {
+      await db.execute(
+        `INSERT INTO dog_records
+          (id,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NULL)`,
+        [row.id, row.type, row.title, row.note, row.time, row.value ?? null,
+          recordAttachmentIds[index], row.time, now, LOCAL_DEVICE_ID],
+      );
+    }
+    for (const [index, row] of backup.photos.entries()) {
+      await db.execute(
+        `INSERT INTO daily_photos
+          (id,date,photoAttachmentId,caption,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,NULL)`,
+        [row.id, row.date, photoAttachmentIds[index], row.caption, now, now, LOCAL_DEVICE_ID],
+      );
+    }
+    for (const [index, row] of backup.supplies.entries()) {
+      await db.execute(
+        `INSERT INTO supplies
+          (id,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NULL)`,
+        [row.id, row.name, row.brand, row.variant, row.category, row.stock,
+          supplyAttachmentIds[index], row.produceDate ?? null, row.shelfMonths ?? null,
+          row.note, row.updatedAt, LOCAL_DEVICE_ID],
+      );
+    }
+    await db.execute(
+      `INSERT INTO app_settings (key,value) VALUES ($1,$2)
+       ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+      ["homeCardTypes", JSON.stringify(backup.homeCardTypes)],
+    );
+  });
+  return {
+    records: backup.records.length,
+    photos: backup.photos.length,
+    supplies: backup.supplies.length,
+  };
+}

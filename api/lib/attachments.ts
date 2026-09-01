@@ -35,6 +35,15 @@ export function attachmentUrl(id: string | null | undefined) {
   return id ? `/api/attachments/${id}` : undefined;
 }
 
+export async function attachmentDataUrl(id: string | null | undefined) {
+  if (!id) return undefined;
+  const attachment = await findAttachment(id);
+  if (!attachment || !fs.existsSync(attachment.filePath)) {
+    throw new Error(`本地图片缺失：${id}`);
+  }
+  return `data:${attachment.mimeType};base64,${fs.readFileSync(attachment.filePath).toString("base64")}`;
+}
+
 export async function persistImage(value: string | undefined) {
   if (!value) return null;
   const existing = value.match(/^\/api\/attachments\/([a-f0-9]{64})$/);

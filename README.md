@@ -1,6 +1,6 @@
 # 宠物观察小助手
 
-单用户、离线优先的宠物档案与日常记录应用。电脑开发环境使用 Hono + SQLite 本地后端；远程服务器使用同一套数据模型，并通过固定设备密钥提供同步接口。
+单用户、纯本地的宠物档案与日常记录应用。Android 使用应用内 SQLite，电脑开发环境使用只监听本机的 Hono + SQLite 后端；不包含账号、远程同步或云端依赖。
 
 ## 本地运行
 
@@ -12,54 +12,24 @@ Copy-Item .env.example .env
 npm run dev
 ```
 
-打开 <http://127.0.0.1:3000/>。本地模式不需要账号、数据库服务或 API 密钥。
-
-如果当前网络需要本地代理才能访问远程同步服务器，只为当前终端设置代理即可；`npm run dev` 和 `npm start` 会让 Node.js 读取这些变量，不会修改 Windows 系统代理：
-
-```powershell
-$env:HTTP_PROXY='http://127.0.0.1:10809'
-$env:HTTPS_PROXY='http://127.0.0.1:10809'
-$env:NO_PROXY='localhost,127.0.0.1,::1'
-npm run dev
-```
+打开 <http://127.0.0.1:3000/>。运行时不需要联网、账号、数据库服务或 API 密钥。
 
 默认数据位置：
 
 - SQLite：`data/pet-life.db`
 - 图片：`data/uploads/`
 
-`data/` 已被 Git 和 Docker 忽略。后端启动时会自动执行 `db/migrations/` 中尚未应用的迁移。
+`data/` 已被 Git 忽略。后端启动时会自动执行 `db/migrations/` 中尚未应用的迁移。
 
-## 服务器模式
+## 数据与备份
 
-服务器模式必须通过 HTTPS 反向代理，并设置至少 32 个随机字节的设备密钥：
+- “我的”页面提供“导出备份”和“导入备份”。
+- 备份是一个 `pet-observation-backup-YYYYMMDD.json` 文件，包含档案、记录、每日照片、物品、主页卡片顺序以及全部图片数据。
+- 导入前会校验文件格式并再次确认；确认后一次性替换当前业务数据。
+- 图片压缩到最长边 2048px 后按 SHA-256 存储，SQLite 保存附件索引。
+- Android 通过系统文件选择器保存和读取备份；网页开发模式通过浏览器下载和选择文件。
 
-```dotenv
-APP_MODE=server
-DATA_DIR=/var/lib/pet-life
-DEVICE_API_KEY=replace-with-a-random-secret
-PUBLIC_BASE_URL=https://pet.example.com
-HOST=127.0.0.1
-PORT=3000
-```
-
-服务器模式下所有 `/api/*` 数据、同步和附件请求都需要：
-
-```http
-Authorization: Bearer <device-key>
-```
-
-健康检查为 `/api/health` 和 `/api/ready`。同步使用 `POST /api/sync`；附件通过 `/api/attachments/:sha256` 检查、上传和下载。
-
-## 数据与同步
-
-- 业务数据使用 UUID、`updatedAt`、设备 ID 和删除墓碑。
-- 本地写入先进入 SQLite 和 outbox，不依赖网络。
-- 冲突采用最后修改覆盖；时间相同则按设备 ID 稳定决胜。
-- 图片压缩到最长边 2048px 后按 SHA-256 存储，SQLite 只保存附件索引。
-- “我的”页面可填写远程 HTTPS 地址和固定设备密钥，并查看待同步数量与最近同步结果。
-- 日常开发连接 `https://yuxiang66.top/pet-dev`；正式使用连接 `https://yuxiang66.top/pet`。两套地址使用不同设备密钥和独立数据库，不要交叉填写。
-- 无代理直连入口使用 `https://pet-api.yuxiang66.top:8443/pet-dev`（开发）和 `https://pet-api.yuxiang66.top:8443/pet`（正式）；仍分别使用对应环境的设备密钥。
+导入会覆盖当前数据，因此建议在导入前先导出一份现状备份。备份文件可能包含私人照片，请自行妥善保管。
 
 ## 验证
 
@@ -94,4 +64,4 @@ npm run android:build:release
 
 首次正式构建会在当前 Windows 用户的 `.android` 目录生成本项目独立签名密钥和 DPAPI 加密的密码文件。两者都不会进入 Git；后续发布更新必须使用同一密钥。同机重建需保留两者；DPAPI 文件只能由当前 Windows 用户解密，跨设备灾备还需在当前账户可用时导出密码，并与 JKS 密钥分开保管。
 
-Android 包内的数据读写已经切换到 Tauri SQLite，本地业务写入与同步 outbox 在同一事务中提交；网页开发环境仍使用 Hono/tRPC。Android 端远程同步使用 Tauri 原生 HTTPS，不依赖 WebView 跨域能力。首次安装后可完全离线记录，之后在“我的”页面配置开发或正式服务器地址和对应密钥。
+Android 包内的数据读写使用 Tauri SQLite，网页开发环境使用 Hono/tRPC 和本机 SQLite。应用没有网络权限，所有记录和备份操作都在本机完成。

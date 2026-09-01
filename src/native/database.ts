@@ -1,6 +1,5 @@
 import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
-import type { EntityType, SyncChange } from "@contracts/sync";
 
 const DATABASE_URL = "sqlite:pet-observation.db";
 const ATTACHMENT_SETTING_PREFIX = "attachmentData:";
@@ -30,14 +29,6 @@ export async function setSetting(key: string, value: string) {
   );
 }
 
-export async function getLocalDeviceId() {
-  const current = await getSetting("localDeviceId");
-  if (current) return current;
-  const id = crypto.randomUUID();
-  await setSetting("localDeviceId", id);
-  return id;
-}
-
 export type TransactionExecutor = {
   execute(query: string, values?: unknown[]): Promise<{ rowsAffected: number }>;
 };
@@ -53,31 +44,6 @@ export async function withTransaction<T>(work: (db: TransactionExecutor) => Prom
   const result = await work(executor);
   if (statements.length) await invoke("execute_sql_transaction", { statements });
   return result;
-}
-
-export async function appendLocalChange(
-  db: TransactionExecutor,
-  deviceId: string,
-  entityType: EntityType,
-  entityId: string,
-  operation: "upsert" | "delete",
-  payload: Record<string, unknown>,
-  modifiedAt: string,
-) {
-  const changeId = crypto.randomUUID();
-  const serialized = JSON.stringify(payload);
-  await db.execute(
-    `INSERT INTO change_log
-      (changeId, deviceId, entityType, entityId, operation, modifiedAt, payload)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)`,
-    [changeId, deviceId, entityType, entityId, operation, modifiedAt, serialized],
-  );
-  await db.execute(
-    `INSERT INTO outbox
-      (changeId, entityType, entityId, operation, modifiedAt, payload)
-     VALUES ($1, $2, $3, $4, $5, $6)`,
-    [changeId, entityType, entityId, operation, modifiedAt, serialized],
-  );
 }
 
 function bytesToHex(bytes: Uint8Array) {
@@ -118,47 +84,4 @@ export async function persistNativeImage(value: string | undefined) {
 
 export function getAttachmentData(id: string | null | undefined) {
   return id ? getSetting(`${ATTACHMENT_SETTING_PREFIX}${id}`) : Promise.resolve(undefined);
-}
-
-export async function storeDownloadedAttachment(id: string, mimeType: string, buffer: ArrayBuffer) {
-  const normalizedMime = mimeType.toLowerCase().split(";")[0];
-  const extension = MIME_EXTENSIONS[normalizedMime];
-  if (!extension) throw new Error("Unsupported image type");
-  const actualId = bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", buffer)));
-  if (actualId !== id) throw new Error("Attachment hash mismatch");
-  const bytes = new Uint8Array(buffer);
-  let binary = "";
-  const chunkSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
-  }
-  const dataUrl = `data:${normalizedMime};base64,${btoa(binary)}`;
-  const db = await getNativeDatabase();
-  await db.execute(
-    `INSERT INTO attachments (id, mimeType, size, extension, createdAt)
-     VALUES ($1, $2, $3, $4, $5) ON CONFLICT(id) DO NOTHING`,
-    [id, normalizedMime, buffer.byteLength, extension, new Date().toISOString()],
-  );
-  await setSetting(`${ATTACHMENT_SETTING_PREFIX}${id}`, dataUrl);
-}
-
-export async function listNativeOutbox(): Promise<SyncChange[]> {
-  const db = await getNativeDatabase();
-  const deviceId = await getLocalDeviceId();
-  const rows = await db.select<Array<{
-    changeId: string;
-    entityType: EntityType;
-    entityId: string;
-    operation: "upsert" | "delete";
-    modifiedAt: string;
-    payload: string;
-  }>>("SELECT changeId, entityType, entityId, operation, modifiedAt, payload FROM outbox ORDER BY rowid");
-  return rows.map(row => ({ ...row, deviceId, payload: JSON.parse(row.payload) as Record<string, unknown> }));
-}
-
-export async function acknowledgeNativeOutbox(changeIds: string[]) {
-  if (!changeIds.length) return;
-  await withTransaction(async db => {
-    for (const id of changeIds) await db.execute("DELETE FROM outbox WHERE changeId = $1", [id]);
-  });
 }

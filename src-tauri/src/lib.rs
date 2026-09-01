@@ -58,16 +58,25 @@ async fn execute_sql_transaction(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let migrations = vec![tauri_plugin_sql::Migration {
-        version: 1,
-        description: "create_initial_pet_tables",
-        sql: include_str!("../../db/migrations/0001_local_sqlite.sql"),
-        kind: tauri_plugin_sql::MigrationKind::Up,
-    }];
+    let migrations = vec![
+        tauri_plugin_sql::Migration {
+            version: 1,
+            description: "create_initial_pet_tables",
+            sql: include_str!("../../db/migrations/0001_local_sqlite.sql"),
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+        tauri_plugin_sql::Migration {
+            version: 2,
+            description: "remove_remote_sync",
+            sql: include_str!("../../db/migrations/0002_remove_remote_sync.sql"),
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
+    ];
 
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![execute_sql_transaction])
-        .plugin(tauri_plugin_http::init())
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_fs::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
                 .add_migrations("sqlite:pet-observation.db", migrations)

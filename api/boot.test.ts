@@ -10,7 +10,6 @@ let app: (typeof import("./boot"))["default"];
 let closeDatabase: () => void;
 
 beforeAll(async () => {
-  process.env.APP_MODE = "local";
   process.env.DATA_DIR = testDataDir;
   const [{ appRouter }, boot, connection] = await Promise.all([
     import("./router"),
@@ -37,7 +36,7 @@ describe("local SQLite backend", () => {
     await expect(health.json()).resolves.toEqual({ ok: true, mode: "local" });
   });
 
-  it("persists profile, records and synchronization outbox entries", async () => {
+  it("persists profile and records locally", async () => {
     await caller.pet.saveProfile({
       name: "小狗", breed: "柯基", birthday: "", homeDate: "",
       gender: "boy", neutered: "", avatar: undefined,
@@ -47,15 +46,13 @@ describe("local SQLite backend", () => {
       time: "2026-08-31T04:00:00.000Z",
     });
 
-    const [profile, records, syncStatus] = await Promise.all([
+    const [profile, records] = await Promise.all([
       caller.pet.getProfile(),
       caller.pet.listRecords(),
-      caller.sync.status(),
     ]);
     expect(profile?.name).toBe("小狗");
     expect(records).toHaveLength(1);
     expect(records[0].note).toBe("测试记录");
-    expect(syncStatus.pendingChanges).toBe(2);
   });
 
   it("stores image bytes outside SQLite and returns an attachment URL", async () => {
@@ -75,5 +72,27 @@ describe("local SQLite backend", () => {
     ]);
     await caller.pet.saveHomeCards(["weight", "bath", "vet"]);
     expect(await caller.pet.getHomeCards()).toEqual(["weight", "bath", "vet"]);
+  });
+
+  it("exports and restores a complete local backup including images", async () => {
+    const backup = await caller.pet.exportBackup();
+    expect(backup.format).toBe("pet-observation-backup");
+    expect(backup.version).toBe(1);
+    expect(backup.records).toHaveLength(1);
+    expect(backup.photos[0].photo).toMatch(/^data:image\/png;base64,/);
+    expect(backup.homeCardTypes).toEqual(["weight", "bath", "vet"]);
+
+    await caller.pet.addRecord({
+      type: "note", title: "临时记录", note: "导入后应消失",
+      time: "2026-08-31T05:00:00.000Z",
+    });
+    await caller.pet.saveHomeCards(["walk"]);
+    const result = await caller.pet.importBackup(backup);
+
+    expect(result).toEqual({ records: 1, photos: 1, supplies: 0 });
+    expect(await caller.pet.listRecords()).toHaveLength(1);
+    expect(await caller.pet.getHomeCards()).toEqual(["weight", "bath", "vet"]);
+    const photos = await caller.pet.listPhotos();
+    expect(await app.request(photos[0].photo)).toHaveProperty("status", 200);
   });
 });

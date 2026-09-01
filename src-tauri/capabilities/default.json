@@ -7,13 +7,9 @@
   ],
   "permissions": [
     "core:default",
-    {
-      "identifier": "http:default",
-      "allow": [
-        { "url": "https://yuxiang66.top/**" },
-        { "url": "https://pet-api.yuxiang66.top:8443/**" }
-      ]
-    },
+    "dialog:default",
+    "fs:allow-read-text-file",
+    "fs:allow-write-text-file",
     "sql:default",
     "sql:allow-execute"
   ]

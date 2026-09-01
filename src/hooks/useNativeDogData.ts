@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { DailyPhoto, DogProfile, DogRecord, SupplyItem } from "@/types";
+import type { PetBackup } from "@contracts/backup";
 import {
   addNativeRecord,
   addNativeSupply,
@@ -15,6 +16,8 @@ import {
   saveNativeProfile,
   setNativePhoto,
   updateNativeSupply,
+  exportNativeBackup,
+  importNativeBackup,
   type NativeHomeCardType,
 } from "@/native/dog-data";
 
@@ -50,19 +53,15 @@ export function useNativeDogData() {
     const initialLoad = window.setTimeout(() => {
       void refresh().finally(() => { if (active) setIsLoading(false); });
     }, 0);
-    const onSynced = () => { void refresh(); };
-    window.addEventListener("pet-native-synced", onSynced);
     return () => {
       active = false;
       window.clearTimeout(initialLoad);
-      window.removeEventListener("pet-native-synced", onSynced);
     };
   }, [refresh]);
 
   const mutate = useCallback(async (operation: () => Promise<unknown>) => {
     await operation();
     await refresh();
-    window.dispatchEvent(new Event("pet-native-data-changed"));
   }, [refresh]);
 
   return {
@@ -83,5 +82,7 @@ export function useNativeDogData() {
     removeSupply: (id: string) => { void mutate(() => removeNativeSupply(id)); },
     setHomeCards: (types: NativeHomeCardType[]) =>
       mutate(() => saveNativeHomeCards(types)).then(() => undefined),
+    createBackup: exportNativeBackup,
+    restoreBackup: (backup: PetBackup) => mutate(() => importNativeBackup(backup)),
   };
 }

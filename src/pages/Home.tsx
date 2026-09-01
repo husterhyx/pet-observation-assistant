@@ -12,11 +12,12 @@ import {
   Bone, Droplets, Footprints, Bath, Scissors, Bean, Scale, Syringe, Bug,
   HeartPulse, Stethoscope, Pill, Smile, NotebookPen, Flag, Plus, Trash2,
   Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap,
-  Cloud, RefreshCw, Server, CheckCircle2, AlertCircle, ImagePlus, SlidersHorizontal,
-  GripVertical,
+  RefreshCw, CheckCircle2, AlertCircle, ImagePlus, SlidersHorizontal,
+  GripVertical, DatabaseBackup, Download, Upload,
 } from 'lucide-react'
 import { useDogData } from '@/hooks/useDogData'
-import { useSync } from '@/hooks/useSync'
+import { parsePetBackupText } from '@contracts/backup'
+import { pickBackupText, saveBackupText } from '@/lib/backup-file'
 import {
   RECORD_TYPE_META, RECORD_GROUPS, SUPPLY_CATEGORIES, STOCK_META, expiryInfo,
   type DailyPhoto, type DogProfile, type DogRecord, type RecordType,
@@ -155,7 +156,6 @@ function Splash({ text }: { text: string }) {
 
 function MainApp() {
   const data = useDogData()
-  const sync = useSync()
   const [tab, setTab] = useState<Tab>('diary')
   const [sheetOpen, setSheetOpen] = useState(false)
   const [sheetType, setSheetType] = useState<RecordType>('feed')
@@ -214,7 +214,7 @@ function MainApp() {
               <div className="h-px flex-1 bg-[#264653]/10" />
             </div>
             <Stats records={data.records} onAddRecord={openRecordSheet} />
-            <SyncSettings sync={sync} />
+            <DataBackup data={data} />
           </>
         )}
 
@@ -1035,105 +1035,83 @@ function AddSupplySheet({ onClose, onSubmit }: {
 
 /* ---------------- 统计 ---------------- */
 
-function SyncSettings({ sync }: { sync: ReturnType<typeof useSync> }) {
-  const urlRef = useRef<HTMLInputElement>(null)
-  const keyRef = useRef<HTMLInputElement>(null)
-  const [notice, setNotice] = useState('')
-  const status = sync.status
+function DataBackup({ data }: { data: ReturnType<typeof useDogData> }) {
+  const [busy, setBusy] = useState<'export' | 'import' | null>(null)
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
 
-  const save = async () => {
-    setNotice('')
+  const exportData = async () => {
+    setBusy('export')
+    setNotice(null)
     try {
-      await sync.configure({
-        serverUrl: urlRef.current?.value.trim() ?? '',
-        apiKey: keyRef.current?.value.trim() || undefined,
-      })
-      if (keyRef.current) keyRef.current.value = ''
-      setNotice('连接设置已保存')
-    } catch {
-      setNotice('保存失败，请检查地址和密钥')
+      const backup = await data.createBackup()
+      const saved = await saveBackupText(JSON.stringify(backup))
+      if (saved) setNotice({ kind: 'ok', text: '备份已导出，请妥善保存' })
+    } catch (error) {
+      setNotice({ kind: 'error', text: error instanceof Error ? error.message : '导出失败' })
+    } finally {
+      setBusy(null)
     }
   }
 
-  const run = async () => {
-    setNotice('')
+  const importData = async () => {
+    setBusy('import')
+    setNotice(null)
     try {
-      await sync.run()
-      setNotice('同步完成')
-    } catch {
-      setNotice('同步失败，请检查服务器状态')
+      const text = await pickBackupText()
+      if (text === null) return
+      const backup = parsePetBackupText(text)
+      const confirmed = window.confirm(
+        `将用此备份替换当前本地数据：\n${backup.records.length} 条记录、${backup.photos.length} 张每日照片、${backup.supplies.length} 件物品。\n\n继续导入吗？`,
+      )
+      if (!confirmed) return
+      await data.restoreBackup(backup)
+      setNotice({ kind: 'ok', text: '导入完成，当前本地数据已更新' })
+    } catch (error) {
+      setNotice({ kind: 'error', text: error instanceof Error ? error.message : '导入失败' })
+    } finally {
+      setBusy(null)
     }
   }
 
   return (
     <section className="px-5 mt-8 mb-2">
       <div className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5 space-y-3">
-        <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <Server size={18} className="text-[#F4A261]" />
-            <div>
-              <h2 className="font-semibold text-sm">个人服务器同步</h2>
-              <p className="text-[11px] text-[#264653]/45">本地优先，联网后自动同步</p>
-            </div>
+        <div className="flex items-center gap-2">
+          <DatabaseBackup size={18} className="text-[#F4A261]" />
+          <div>
+            <h2 className="font-semibold text-sm">本地数据备份</h2>
+            <p className="text-[11px] text-[#264653]/45">记录和照片一起保存为备份文件</p>
           </div>
-          <span className={`text-[11px] px-2.5 py-1 rounded-full ${
-            status?.configured ? 'bg-[#A8DADC]/40 text-[#2A7F83]' : 'bg-[#264653]/8 text-[#264653]/45'
-          }`}>
-            {status?.configured ? '已配置' : '仅本地'}
-          </span>
         </div>
-
-        <label className="block">
-          <span className="text-xs text-[#264653]/50">服务器地址</span>
-          <input
-            key={status?.serverUrl ?? ''}
-            ref={urlRef}
-            defaultValue={status?.serverUrl ?? ''}
-            placeholder="https://你的域名"
-            inputMode="url"
-            className="mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40"
-          />
-        </label>
-        <label className="block">
-          <span className="text-xs text-[#264653]/50">固定设备密钥</span>
-          <input
-            ref={keyRef}
-            type="password"
-            placeholder={status?.hasApiKey ? '已保存；留空表示不修改' : '输入服务器设备密钥'}
-            autoComplete="off"
-            className="mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40"
-          />
-        </label>
         <div className="grid grid-cols-2 gap-2">
-          <button onClick={save} className="rounded-2xl py-2.5 text-sm font-semibold bg-[#F4A261] text-white">
-            保存设置
+          <button
+            type="button"
+            onClick={() => void exportData()}
+            disabled={busy !== null}
+            className="rounded-2xl py-2.5 text-sm font-semibold bg-[#F4A261] text-white disabled:opacity-40 flex items-center justify-center gap-1.5"
+          >
+            {busy === 'export' ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
+            导出备份
           </button>
           <button
-            onClick={run}
-            disabled={!status?.configured || sync.isSyncing}
+            type="button"
+            onClick={() => void importData()}
+            disabled={busy !== null}
             className="rounded-2xl py-2.5 text-sm font-semibold bg-[#F5F0E1] text-[#264653] disabled:opacity-40 flex items-center justify-center gap-1.5"
           >
-            <RefreshCw size={14} className={sync.isSyncing ? 'animate-spin' : ''} />
-            {sync.isSyncing ? '同步中' : '立即同步'}
+            {busy === 'import' ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
+            导入备份
           </button>
         </div>
-
-        <div className="text-[11px] text-[#264653]/45 space-y-1">
-          <p className="flex items-center gap-1.5">
-            <Cloud size={12} /> 待同步变更：{status?.pendingChanges ?? 0}
+        <p className="text-[11px] text-[#264653]/45">导入前会再次确认；导入成功后将替换当前档案、记录、照片和物品数据。</p>
+        {notice && (
+          <p className={`flex items-center gap-1.5 text-[11px] ${notice.kind === 'error' ? 'text-[#C0452B]' : 'text-[#2A7F83]'}`}>
+            {notice.kind === 'error' ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
+            {notice.text}
           </p>
-          <p>上次同步：{status?.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString() : '尚未同步'}</p>
-          {(notice || sync.syncError) && (
-            <p className={`flex items-center gap-1.5 ${sync.syncError ? 'text-[#C0452B]' : 'text-[#2A7F83]'}`}>
-              {sync.syncError ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
-              {sync.syncError || notice}
-            </p>
-          )}
-        </div>
+        )}
       </div>
-      <p className="text-center text-[11px] text-[#264653]/35 mt-3">
-        数据保存在本机 SQLite；远程连接只接受 HTTPS
-      </p>
+      <p className="text-center text-[11px] text-[#264653]/35 mt-3">全部数据仅保存在本机，不连接远程服务器</p>
     </section>
   )
 }

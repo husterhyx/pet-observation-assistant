@@ -2,10 +2,11 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { createRouter, publicQuery } from "./middleware";
-import { getDb } from "./queries/connection";
+import { getDb, getSqlite } from "./queries/connection";
 import { dailyPhotos, dogProfiles, dogRecords, supplies } from "@db/schema";
-import { attachmentUrl, persistImage } from "./lib/attachments";
-import { getLocalDeviceId, getSetting, recordLocalChange, setSetting } from "./sync/change-store";
+import { attachmentDataUrl, attachmentUrl, persistImage } from "./lib/attachments";
+import { getSetting, setSetting } from "./lib/settings";
+import { petBackupSchema } from "@contracts/backup";
 
 const PROFILE_ID = "profile";
 const recordType = z.enum([
@@ -18,6 +19,17 @@ const homeCardType = z.enum([
 ]);
 const DEFAULT_HOME_CARDS = ["walk", "weight", "deworm", "vaccine", "checkup", "milestone"] as const;
 const HOME_CARDS_SETTING = "homeCardTypes";
+const LOCAL_DEVICE_ID = "local";
+
+function parseHomeCards(stored: string | undefined) {
+  if (!stored) return [...DEFAULT_HOME_CARDS];
+  try {
+    const parsed = z.array(homeCardType).min(1).safeParse(JSON.parse(stored));
+    return parsed.success ? [...new Set(parsed.data)] : [...DEFAULT_HOME_CARDS];
+  } catch {
+    return [...DEFAULT_HOME_CARDS];
+  }
+}
 
 const profileInput = z.object({
   name: z.string().max(100),
@@ -31,14 +43,7 @@ const profileInput = z.object({
 
 export const petRouter = createRouter({
   getHomeCards: publicQuery.query(async () => {
-    const stored = await getSetting(HOME_CARDS_SETTING);
-    if (!stored) return [...DEFAULT_HOME_CARDS];
-    try {
-      const parsed = z.array(homeCardType).min(1).safeParse(JSON.parse(stored));
-      return parsed.success ? [...new Set(parsed.data)] : [...DEFAULT_HOME_CARDS];
-    } catch {
-      return [...DEFAULT_HOME_CARDS];
-    }
+    return parseHomeCards(await getSetting(HOME_CARDS_SETTING));
   }),
 
   saveHomeCards: publicQuery
@@ -69,7 +74,6 @@ export const petRouter = createRouter({
       where: eq(dogProfiles.id, PROFILE_ID),
     });
     const now = new Date().toISOString();
-    const deviceId = await getLocalDeviceId();
     const avatarAttachmentId = input.avatar
       ? await persistImage(input.avatar)
       : current?.avatarAttachmentId ?? null;
@@ -83,14 +87,13 @@ export const petRouter = createRouter({
       neutered: input.neutered,
       avatarAttachmentId,
       updatedAt: now,
-      modifiedByDeviceId: deviceId,
+      modifiedByDeviceId: LOCAL_DEVICE_ID,
       deletedAt: null,
     };
     await getDb()
       .insert(dogProfiles)
       .values(row)
       .onConflictDoUpdate({ target: dogProfiles.id, set: row });
-    await recordLocalChange("profile", PROFILE_ID, "upsert", row, now);
   }),
 
   listRecords: publicQuery.query(async () => {
@@ -132,24 +135,16 @@ export const petRouter = createRouter({
         photoAttachmentId: await persistImage(input.photo),
         createdAt: now,
         updatedAt: now,
-        modifiedByDeviceId: await getLocalDeviceId(),
+        modifiedByDeviceId: LOCAL_DEVICE_ID,
         deletedAt: null,
       };
       await getDb().insert(dogRecords).values(row);
-      await recordLocalChange("record", row.id, "upsert", row, now);
     }),
 
   removeRecord: publicQuery
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {
-      const current = await getDb().query.dogRecords.findFirst({
-        where: eq(dogRecords.id, input.id),
-      });
-      if (!current) return;
-      const now = new Date().toISOString();
-      const row = { ...current, updatedAt: now, deletedAt: now, modifiedByDeviceId: await getLocalDeviceId() };
-      await getDb().update(dogRecords).set(row).where(eq(dogRecords.id, input.id));
-      await recordLocalChange("record", row.id, "delete", row, now);
+      await getDb().delete(dogRecords).where(eq(dogRecords.id, input.id));
     }),
 
   listPhotos: publicQuery.query(async () => {
@@ -185,27 +180,19 @@ export const petRouter = createRouter({
         caption: input.caption,
         createdAt: existing?.createdAt ?? now,
         updatedAt: now,
-        modifiedByDeviceId: await getLocalDeviceId(),
+        modifiedByDeviceId: LOCAL_DEVICE_ID,
         deletedAt: null,
       };
       await getDb()
         .insert(dailyPhotos)
         .values(row)
         .onConflictDoUpdate({ target: dailyPhotos.id, set: row });
-      await recordLocalChange("dailyPhoto", row.id, "upsert", row, now);
     }),
 
   removePhoto: publicQuery
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {
-      const current = await getDb().query.dailyPhotos.findFirst({
-        where: eq(dailyPhotos.id, input.id),
-      });
-      if (!current) return;
-      const now = new Date().toISOString();
-      const row = { ...current, updatedAt: now, deletedAt: now, modifiedByDeviceId: await getLocalDeviceId() };
-      await getDb().update(dailyPhotos).set(row).where(eq(dailyPhotos.id, input.id));
-      await recordLocalChange("dailyPhoto", row.id, "delete", row, now);
+      await getDb().delete(dailyPhotos).where(eq(dailyPhotos.id, input.id));
     }),
 
   listSupplies: publicQuery.query(async () => {
@@ -256,11 +243,10 @@ export const petRouter = createRouter({
         shelfMonths: input.shelfMonths ?? null,
         note: input.note,
         updatedAt: now,
-        modifiedByDeviceId: await getLocalDeviceId(),
+        modifiedByDeviceId: LOCAL_DEVICE_ID,
         deletedAt: null,
       };
       await getDb().insert(supplies).values(row);
-      await recordLocalChange("supply", row.id, "upsert", row, now);
     }),
 
   updateSupply: publicQuery
@@ -278,20 +264,128 @@ export const petRouter = createRouter({
         ...(input.stock === undefined ? {} : { stock: input.stock }),
         ...(input.note === undefined ? {} : { note: input.note }),
         updatedAt: now,
-        modifiedByDeviceId: await getLocalDeviceId(),
+        modifiedByDeviceId: LOCAL_DEVICE_ID,
       };
       await getDb().update(supplies).set(row).where(eq(supplies.id, input.id));
-      await recordLocalChange("supply", row.id, "upsert", row, now);
     }),
 
   removeSupply: publicQuery
     .input(z.object({ id: z.string().uuid() }))
     .mutation(async ({ input }) => {
-      const current = await getDb().query.supplies.findFirst({ where: eq(supplies.id, input.id) });
-      if (!current) return;
-      const now = new Date().toISOString();
-      const row = { ...current, updatedAt: now, deletedAt: now, modifiedByDeviceId: await getLocalDeviceId() };
-      await getDb().update(supplies).set(row).where(eq(supplies.id, input.id));
-      await recordLocalChange("supply", row.id, "delete", row, now);
+      await getDb().delete(supplies).where(eq(supplies.id, input.id));
     }),
+
+  exportBackup: publicQuery.query(async () => {
+    const [profileRow, recordRows, photoRows, supplyRows, homeCardTypes] = await Promise.all([
+      getDb().query.dogProfiles.findFirst({
+        where: and(eq(dogProfiles.id, PROFILE_ID), isNull(dogProfiles.deletedAt)),
+      }),
+      getDb().select().from(dogRecords).where(isNull(dogRecords.deletedAt)).orderBy(desc(dogRecords.time)),
+      getDb().select().from(dailyPhotos).where(isNull(dailyPhotos.deletedAt)).orderBy(desc(dailyPhotos.date)),
+      getDb().select().from(supplies).where(isNull(supplies.deletedAt)).orderBy(desc(supplies.updatedAt)),
+      getSetting(HOME_CARDS_SETTING),
+    ]);
+    return petBackupSchema.parse({
+      format: "pet-observation-backup",
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      profile: profileRow ? {
+        name: profileRow.name,
+        breed: profileRow.breed,
+        birthday: profileRow.birthday,
+        homeDate: profileRow.homeDate,
+        gender: profileRow.gender,
+        neutered: profileRow.neutered,
+        avatar: await attachmentDataUrl(profileRow.avatarAttachmentId),
+      } : {
+        name: "", breed: "", birthday: "", homeDate: "", gender: "boy", neutered: "",
+      },
+      records: await Promise.all(recordRows.map(async row => ({
+        id: row.id,
+        type: row.type,
+        title: row.title,
+        note: row.note,
+        time: row.time,
+        value: row.value ?? undefined,
+        photo: await attachmentDataUrl(row.photoAttachmentId),
+      }))),
+      photos: await Promise.all(photoRows.map(async row => ({
+        id: row.id,
+        date: row.date,
+        photo: await attachmentDataUrl(row.photoAttachmentId),
+        caption: row.caption,
+      }))),
+      supplies: await Promise.all(supplyRows.map(async row => ({
+        id: row.id,
+        name: row.name,
+        brand: row.brand,
+        variant: row.variant,
+        category: row.category,
+        stock: row.stock,
+        photo: await attachmentDataUrl(row.photoAttachmentId),
+        produceDate: row.produceDate ?? undefined,
+        shelfMonths: row.shelfMonths ?? undefined,
+        note: row.note,
+        updatedAt: row.updatedAt,
+      }))),
+      homeCardTypes: parseHomeCards(homeCardTypes),
+    });
+  }),
+
+  importBackup: publicQuery.input(petBackupSchema).mutation(async ({ input }) => {
+    const now = new Date().toISOString();
+    const [avatarAttachmentId, recordAttachmentIds, photoAttachmentIds, supplyAttachmentIds] = await Promise.all([
+      persistImage(input.profile.avatar),
+      Promise.all(input.records.map(row => persistImage(row.photo))),
+      Promise.all(input.photos.map(row => persistImage(row.photo))),
+      Promise.all(input.supplies.map(row => persistImage(row.photo))),
+    ]);
+    const sqlite = getSqlite();
+    sqlite.transaction(() => {
+      sqlite.prepare("DELETE FROM dog_records").run();
+      sqlite.prepare("DELETE FROM daily_photos").run();
+      sqlite.prepare("DELETE FROM supplies").run();
+      sqlite.prepare("DELETE FROM dog_profiles").run();
+
+      sqlite.prepare(`INSERT INTO dog_profiles
+        (id,name,breed,birthday,homeDate,gender,neutered,avatarAttachmentId,updatedAt,modifiedByDeviceId,deletedAt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,NULL)`)
+        .run(PROFILE_ID, input.profile.name, input.profile.breed, input.profile.birthday,
+          input.profile.homeDate, input.profile.gender, input.profile.neutered,
+          avatarAttachmentId, now, LOCAL_DEVICE_ID);
+
+      const insertRecord = sqlite.prepare(`INSERT INTO dog_records
+        (id,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,NULL)`);
+      input.records.forEach((row, index) => insertRecord.run(
+        row.id, row.type, row.title, row.note, row.time, row.value ?? null,
+        recordAttachmentIds[index], row.time, now, LOCAL_DEVICE_ID,
+      ));
+
+      const insertPhoto = sqlite.prepare(`INSERT INTO daily_photos
+        (id,date,photoAttachmentId,caption,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
+        VALUES (?,?,?,?,?,?,?,NULL)`);
+      input.photos.forEach((row, index) => insertPhoto.run(
+        row.id, row.date, photoAttachmentIds[index], row.caption, now, now, LOCAL_DEVICE_ID,
+      ));
+
+      const insertSupply = sqlite.prepare(`INSERT INTO supplies
+        (id,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)`);
+      input.supplies.forEach((row, index) => insertSupply.run(
+        row.id, row.name, row.brand, row.variant, row.category, row.stock,
+        supplyAttachmentIds[index], row.produceDate ?? null, row.shelfMonths ?? null,
+        row.note, row.updatedAt, LOCAL_DEVICE_ID,
+      ));
+
+      sqlite.prepare(`INSERT INTO app_settings (key,value) VALUES (?,?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`)
+        .run(HOME_CARDS_SETTING, JSON.stringify(input.homeCardTypes));
+    })();
+    return {
+      records: input.records.length,
+      photos: input.photos.length,
+      supplies: input.supplies.length,
+    };
+  }),
 });

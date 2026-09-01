@@ -1,6 +1,6 @@
 import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
-const syncColumns = {
+const legacyMetadataColumns = {
   updatedAt: text("updatedAt").notNull(),
   modifiedByDeviceId: text("modifiedByDeviceId").notNull(),
   deletedAt: text("deletedAt"),
@@ -15,7 +15,7 @@ export const dogProfiles = sqliteTable("dog_profiles", {
   gender: text("gender", { enum: ["boy", "girl"] }).default("boy").notNull(),
   neutered: text("neutered", { enum: ["", "yes", "no"] }).default("").notNull(),
   avatarAttachmentId: text("avatarAttachmentId"),
-  ...syncColumns,
+  ...legacyMetadataColumns,
 });
 
 export const dogRecords = sqliteTable(
@@ -29,7 +29,7 @@ export const dogRecords = sqliteTable(
     value: real("value"),
     photoAttachmentId: text("photoAttachmentId"),
     createdAt: text("createdAt").notNull(),
-    ...syncColumns,
+    ...legacyMetadataColumns,
   },
   (table) => [index("records_time_idx").on(table.time)],
 );
@@ -42,7 +42,7 @@ export const dailyPhotos = sqliteTable(
     photoAttachmentId: text("photoAttachmentId").notNull(),
     caption: text("caption").default("").notNull(),
     createdAt: text("createdAt").notNull(),
-    ...syncColumns,
+    ...legacyMetadataColumns,
   },
   (table) => [uniqueIndex("photos_date_idx").on(table.date)],
 );
@@ -60,7 +60,7 @@ export const supplies = sqliteTable(
     produceDate: text("produceDate"),
     shelfMonths: integer("shelfMonths"),
     note: text("note").default("").notNull(),
-    ...syncColumns,
+    ...legacyMetadataColumns,
   },
   (table) => [index("supplies_updated_idx").on(table.updatedAt)],
 );
@@ -71,33 +71,6 @@ export const attachments = sqliteTable("attachments", {
   size: integer("size").notNull(),
   extension: text("extension").notNull(),
   createdAt: text("createdAt").notNull(),
-});
-
-export const changeLog = sqliteTable(
-  "change_log",
-  {
-    revision: integer("revision").primaryKey({ autoIncrement: true }),
-    changeId: text("changeId").notNull(),
-    deviceId: text("deviceId").notNull(),
-    entityType: text("entityType").notNull(),
-    entityId: text("entityId").notNull(),
-    operation: text("operation", { enum: ["upsert", "delete"] }).notNull(),
-    modifiedAt: text("modifiedAt").notNull(),
-    payload: text("payload").notNull(),
-  },
-  (table) => [
-    uniqueIndex("change_id_idx").on(table.changeId),
-    index("change_revision_idx").on(table.revision),
-  ],
-);
-
-export const outbox = sqliteTable("outbox", {
-  changeId: text("changeId").primaryKey(),
-  entityType: text("entityType").notNull(),
-  entityId: text("entityId").notNull(),
-  operation: text("operation", { enum: ["upsert", "delete"] }).notNull(),
-  modifiedAt: text("modifiedAt").notNull(),
-  payload: text("payload").notNull(),
 });
 
 export const appSettings = sqliteTable("app_settings", {
