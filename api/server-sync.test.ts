@@ -12,7 +12,7 @@ let closeDatabase: () => void;
 beforeAll(async () => {
   process.env.APP_MODE = "server";
   process.env.DEVICE_API_KEY = apiKey;
-  process.env.DATA_DIR = testDataDir;
+  process.env.SERVER_LOCAL_DATA_DIR = testDataDir;
   const [boot, connection] = await Promise.all([
     import("./boot"),
     import("./queries/connection"),

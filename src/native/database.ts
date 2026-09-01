@@ -2,7 +2,7 @@ import Database from "@tauri-apps/plugin-sql";
 import { invoke } from "@tauri-apps/api/core";
 import type { EntityType, SyncChange } from "@contracts/sync";
 
-const DATABASE_URL = "sqlite:pet-observation.db";
+const DATABASE_URL = "sqlite:pet-observation-server.db";
 const ATTACHMENT_SETTING_PREFIX = "attachmentData:";
 
 let databasePromise: Promise<Database> | null = null;

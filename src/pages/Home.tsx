@@ -1038,30 +1038,32 @@ function AddSupplySheet({ onClose, onSubmit }: {
 function SyncSettings({ sync }: { sync: ReturnType<typeof useSync> }) {
   const urlRef = useRef<HTMLInputElement>(null)
   const keyRef = useRef<HTMLInputElement>(null)
-  const [notice, setNotice] = useState('')
+  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
   const status = sync.status
 
   const save = async () => {
-    setNotice('')
+    setNotice(null)
     try {
       await sync.configure({
         serverUrl: urlRef.current?.value.trim() ?? '',
         apiKey: keyRef.current?.value.trim() || undefined,
       })
       if (keyRef.current) keyRef.current.value = ''
-      setNotice('连接设置已保存')
-    } catch {
-      setNotice('保存失败，请检查地址和密钥')
+      setNotice({ kind: 'ok', text: '连接设置已保存' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误'
+      setNotice({ kind: 'error', text: `保存失败：${message}` })
     }
   }
 
   const run = async () => {
-    setNotice('')
+    setNotice(null)
     try {
       await sync.run()
-      setNotice('同步完成')
-    } catch {
-      setNotice('同步失败，请检查服务器状态')
+      setNotice({ kind: 'ok', text: '同步完成' })
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误'
+      setNotice({ kind: 'error', text: `同步失败：${message}` })
     }
   }
 
@@ -1124,9 +1126,9 @@ function SyncSettings({ sync }: { sync: ReturnType<typeof useSync> }) {
           </p>
           <p>上次同步：{status?.lastSyncAt ? new Date(status.lastSyncAt).toLocaleString() : '尚未同步'}</p>
           {(notice || sync.syncError) && (
-            <p className={`flex items-center gap-1.5 ${sync.syncError ? 'text-[#C0452B]' : 'text-[#2A7F83]'}`}>
-              {sync.syncError ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
-              {sync.syncError || notice}
+            <p className={`flex items-center gap-1.5 ${sync.syncError || notice?.kind === 'error' ? 'text-[#C0452B]' : 'text-[#2A7F83]'}`}>
+              {sync.syncError || notice?.kind === 'error' ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
+              {sync.syncError || notice?.text}
             </p>
           )}
         </div>

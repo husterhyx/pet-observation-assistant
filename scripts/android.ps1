@@ -9,21 +9,23 @@ $ErrorActionPreference = "Stop"
 Add-Type -AssemblyName System.Security
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$sdkRoot = "D:\Android\Sdk"
-$ndkRoot = Join-Path $sdkRoot "ndk\29.0.13846066"
-$javaRoot = "C:\Program Files\Microsoft\jdk-17.0.13.11-hotspot"
-$gradleRoot = "D:\Android\GradleCache"
-$avdRoot = "D:\Android\Avd"
-$buildRoot = "D:\Android\Build\pet-observation"
+$sdkRoot = if ($env:ANDROID_HOME) { $env:ANDROID_HOME } elseif ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
+$ndkVersion = if ($env:PET_ANDROID_NDK_VERSION) { $env:PET_ANDROID_NDK_VERSION } else { "29.0.13846066" }
+$ndkRoot = Join-Path $sdkRoot "ndk\$ndkVersion"
+$javaRoot = if ($env:JAVA_HOME) { $env:JAVA_HOME } else { throw "Set JAVA_HOME to a JDK 17 installation before building." }
+$gradleRoot = if ($env:GRADLE_USER_HOME) { $env:GRADLE_USER_HOME } else { Join-Path $env:USERPROFILE ".gradle" }
+$avdRoot = if ($env:ANDROID_AVD_HOME) { $env:ANDROID_AVD_HOME } else { Join-Path $env:USERPROFILE ".android\avd" }
+$buildRoot = if ($env:PET_ANDROID_BUILD_ROOT) { $env:PET_ANDROID_BUILD_ROOT } else { Join-Path $env:TEMP "pet-observation-server-build" }
 $rustTargetRoot = Join-Path $buildRoot "rust-target"
 $androidBuildProject = Join-Path $buildRoot "android"
 $tauri = Join-Path $repoRoot "node_modules\.bin\tauri.cmd"
-$proxyUrl = "http://127.0.0.1:10809"
+$proxyUrl = $env:PET_BUILD_PROXY
 $androidProject = Join-Path $repoRoot "src-tauri\gen\android"
-$buildToolsRoot = Join-Path $sdkRoot "build-tools\36.0.0"
-$releaseKeystore = Join-Path $env:USERPROFILE ".android\pet-observation-release.jks"
-$releasePasswordFile = Join-Path $env:USERPROFILE ".android\pet-observation-release.password.dpapi"
-$releaseKeyAlias = "pet-observation"
+$buildToolsVersion = if ($env:PET_ANDROID_BUILD_TOOLS_VERSION) { $env:PET_ANDROID_BUILD_TOOLS_VERSION } else { "36.0.0" }
+$buildToolsRoot = Join-Path $sdkRoot "build-tools\$buildToolsVersion"
+$releaseKeystore = Join-Path $env:USERPROFILE ".android\pet-observation-server-release.jks"
+$releasePasswordFile = Join-Path $env:USERPROFILE ".android\pet-observation-server-release.password.dpapi"
+$releaseKeyAlias = "pet-observation-server"
 
 $requiredPaths = @(
     $tauri,
@@ -38,7 +40,7 @@ $requiredPaths = @(
 
 foreach ($requiredPath in $requiredPaths) {
     if (-not (Test-Path -LiteralPath $requiredPath)) {
-        throw "Android 构建依赖不存在：$requiredPath"
+        throw "Android build dependency not found: $requiredPath"
     }
 }
 
@@ -53,9 +55,11 @@ $env:Path = "$(Join-Path $javaRoot 'bin');$(Join-Path $sdkRoot 'platform-tools')
 New-Item -ItemType Directory -Path $buildRoot, $rustTargetRoot, $gradleRoot -Force | Out-Null
 
 function Test-LocalProxy {
+    if (-not $proxyUrl) { return $false }
+    $proxyUri = [Uri]$proxyUrl
     $client = [Net.Sockets.TcpClient]::new()
     try {
-        $pending = $client.ConnectAsync("127.0.0.1", 10809)
+        $pending = $client.ConnectAsync($proxyUri.Host, $proxyUri.Port)
         return $pending.Wait(300) -and $client.Connected
     }
     catch {
@@ -121,11 +125,12 @@ function Get-ReleaseSigningPassword {
 }
 
 if (Test-LocalProxy) {
+    $proxyUri = [Uri]$proxyUrl
     $env:HTTP_PROXY = $proxyUrl
     $env:HTTPS_PROXY = $proxyUrl
     $env:ALL_PROXY = $proxyUrl
     $env:NO_PROXY = "localhost,127.0.0.1,::1"
-    $env:GRADLE_OPTS = "-Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=10809 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=10809"
+    $env:GRADLE_OPTS = "-Dhttp.proxyHost=$($proxyUri.Host) -Dhttp.proxyPort=$($proxyUri.Port) -Dhttps.proxyHost=$($proxyUri.Host) -Dhttps.proxyPort=$($proxyUri.Port)"
 }
 
 Push-Location $repoRoot
@@ -151,6 +156,16 @@ try {
     elseif ($Action -in @("build-debug", "build-emulator", "build-release")) {
         & npm.cmd run build:web
         if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE" }
+
+        # Tauri's Android bridge is generated and intentionally ignored by Git.
+        # Recreate it automatically so a fresh clone can build with one command.
+        $tauriConfigPath = Join-Path $repoRoot "src-tauri\tauri.conf.json"
+        $applicationId = ([IO.File]::ReadAllText($tauriConfigPath, [Text.Encoding]::UTF8) | ConvertFrom-Json).identifier
+        $generatedActivity = Join-Path $androidProject ("app\src\main\java\" + $applicationId.Replace(".", "\") + "\generated\TauriActivity.kt")
+        if (-not (Test-Path -LiteralPath $generatedActivity)) {
+            & $tauri android init --ci --skip-targets-install
+            if ($LASTEXITCODE -ne 0) { throw "Tauri Android bridge generation failed with exit code $LASTEXITCODE" }
+        }
 
         if ($Action -eq "build-emulator") {
             $rustTarget = "x86_64-linux-android"
@@ -214,7 +229,8 @@ try {
             throw "Unexpected Android build path: $androidBuildProjectFull"
         }
         New-Item -ItemType Directory -Path $androidBuildProjectFull -Force | Out-Null
-        & robocopy.exe $androidProject $androidBuildProjectFull /E /XD .gradle build "app\build" "buildSrc\build" /NFL /NDL /NJH /NJS /NP
+        # The build directory is validated above; mirror removes stale generated package paths after an ID change.
+        & robocopy.exe $androidProject $androidBuildProjectFull /MIR /XD .gradle build "app\build" "buildSrc\build" /NFL /NDL /NJH /NJS /NP
         if ($LASTEXITCODE -gt 7) { throw "Android project copy failed with exit code $LASTEXITCODE" }
 
         $sourceLib = Join-Path $rustTargetRoot "$rustTarget\$rustProfile\libpet_observation_mobile_lib.so"
@@ -239,11 +255,11 @@ try {
         if (-not (Test-Path -LiteralPath $sourceApk)) { throw "Expected APK was not generated: $sourceApk" }
         $deliveryDir = Join-Path $repoRoot "dist\android"
         $deliverySuffix = if ($isRelease) { "release" } else { "debug" }
-        $deliveryApk = Join-Path $deliveryDir "pet-observation-$appVersion-$outputFlavor-$deliverySuffix.apk"
+        $deliveryApk = Join-Path $deliveryDir "pet-observation-server-$appVersion-$outputFlavor-$deliverySuffix.apk"
         New-Item -ItemType Directory -Path $deliveryDir -Force | Out-Null
 
         if ($isRelease) {
-            $alignedApk = Join-Path $buildRoot "pet-observation-$appVersion-$outputFlavor-aligned.apk"
+            $alignedApk = Join-Path $buildRoot "pet-observation-server-$appVersion-$outputFlavor-aligned.apk"
             & (Join-Path $buildToolsRoot "zipalign.exe") -f -p 4 $sourceApk $alignedApk
             if ($LASTEXITCODE -ne 0) { throw "APK alignment failed with exit code $LASTEXITCODE" }
             $signingPassword = Get-ReleaseSigningPassword

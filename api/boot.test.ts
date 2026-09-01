@@ -11,7 +11,7 @@ let closeDatabase: () => void;
 
 beforeAll(async () => {
   process.env.APP_MODE = "local";
-  process.env.DATA_DIR = testDataDir;
+  process.env.SERVER_LOCAL_DATA_DIR = testDataDir;
   const [{ appRouter }, boot, connection] = await Promise.all([
     import("./router"),
     import("./boot"),

@@ -18,7 +18,7 @@ async fn execute_sql_transaction(
         .path()
         .app_config_dir()
         .map_err(|error| error.to_string())?
-        .join("pet-observation.db");
+        .join("pet-observation-server.db");
     let options = sqlx::sqlite::SqliteConnectOptions::new()
         .filename(database_path)
         .create_if_missing(true);
@@ -70,7 +70,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(
             tauri_plugin_sql::Builder::default()
-                .add_migrations("sqlite:pet-observation.db", migrations)
+                .add_migrations("sqlite:pet-observation-server.db", migrations)
                 .build(),
         )
         .setup(|app| {

@@ -5,6 +5,6 @@ export default defineConfig({
   out: "./db/generated-migrations",
   dialect: "sqlite",
   dbCredentials: {
-    url: "./data/pet-life.db",
+    url: "./server-data/pet-life.db",
   },
 });
