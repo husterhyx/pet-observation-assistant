@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { isTauri } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   DndContext,
   PointerSensor,
@@ -57,10 +59,20 @@ import {
   Check,
   ChevronRight,
   Sparkles,
+  ArrowUpRight,
+  BellRing,
+  WifiOff,
 } from "lucide-react";
 import { usePetData, type HomeCardType } from "@/hooks/usePetData";
 import { parsePetBackupText } from "@contracts/backup";
 import { pickBackupText, saveBackupText } from "@/lib/backup-file";
+import {
+  compareVersions,
+  fetchLatestRelease,
+  isTrustedReleaseUrl,
+  shouldRunDailyCheck,
+  type ReleaseInfo,
+} from "@/lib/update-check";
 import {
   RECORD_GROUPS,
   RECORD_TYPE_META,
@@ -128,6 +140,99 @@ const HOME_OPTIONS: HomeCardType[] = [
 ];
 type Tab = "diary" | "photos" | "supplies" | "me";
 type Data = ReturnType<typeof usePetData>;
+type UpdateStatus = "idle" | "checking" | "current" | "available" | "error";
+type UpdateController = ReturnType<typeof useUpdateChecker>;
+
+const AUTO_UPDATE_KEY = "pet-observation:update:auto";
+const LAST_UPDATE_CHECK_KEY = "pet-observation:update:last-check-at";
+
+function readLocalSetting(key: string) {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocalSetting(key: string, value: string) {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // Update preferences are non-critical and may be unavailable in private mode.
+  }
+}
+
+function useUpdateChecker() {
+  const [autoEnabled, setAutoEnabledState] = useState(
+    () => readLocalSetting(AUTO_UPDATE_KEY) !== "false"
+  );
+  const [lastCheckAt, setLastCheckAt] = useState<string | null>(() =>
+    readLocalSetting(LAST_UPDATE_CHECK_KEY)
+  );
+  const [status, setStatus] = useState<UpdateStatus>("idle");
+  const [release, setRelease] = useState<ReleaseInfo>();
+  const [message, setMessage] = useState("");
+  const [noticeOpen, setNoticeOpen] = useState(false);
+  const checkingRef = useRef(false);
+
+  const check = useCallback(async (automatic = false) => {
+    if (checkingRef.current) return;
+    checkingRef.current = true;
+    const checkedAt = new Date().toISOString();
+    setLastCheckAt(checkedAt);
+    writeLocalSetting(LAST_UPDATE_CHECK_KEY, checkedAt);
+    setStatus("checking");
+    setMessage(automatic ? "正在自动检查 GitHub 更新…" : "正在连接 GitHub…");
+    try {
+      const latest = await fetchLatestRelease();
+      setRelease(latest);
+      if (compareVersions(latest.version, __APP_VERSION__) > 0) {
+        setStatus("available");
+        setMessage(`发现新版本 ${latest.version}`);
+        setNoticeOpen(true);
+      } else {
+        setStatus("current");
+        setMessage(`已是最新版本 ${__APP_VERSION__}`);
+      }
+    } catch (error) {
+      setStatus("error");
+      setMessage(error instanceof Error ? error.message : "检查更新失败");
+    } finally {
+      checkingRef.current = false;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (autoEnabled && shouldRunDailyCheck(lastCheckAt)) void check(true);
+  }, [autoEnabled, check, lastCheckAt]);
+
+  const setAutoEnabled = (enabled: boolean) => {
+    setAutoEnabledState(enabled);
+    writeLocalSetting(AUTO_UPDATE_KEY, String(enabled));
+  };
+
+  return {
+    autoEnabled,
+    setAutoEnabled,
+    lastCheckAt,
+    status,
+    release,
+    message,
+    noticeOpen,
+    setNoticeOpen,
+    check,
+  };
+}
+
+async function openReleasePage(url: string) {
+  if (!isTrustedReleaseUrl(url)) throw new Error("更新地址不安全");
+  if (isTauri()) {
+    await openUrl(url);
+    return;
+  }
+  const opened = window.open(url, "_blank", "noopener,noreferrer");
+  if (!opened) window.location.assign(url);
+}
 
 function speciesText(species: PetSpecies) {
   return species === "cat" ? "猫咪" : "狗狗";
@@ -220,6 +325,7 @@ export default function Home() {
 }
 function MainApp() {
   const data = usePetData();
+  const updates = useUpdateChecker();
   const [tab, setTab] = useState<Tab>("diary");
   const [recordType, setRecordType] = useState<RecordType>();
   const [cardsOpen, setCardsOpen] = useState(false);
@@ -266,7 +372,9 @@ function MainApp() {
             )}
             {tab === "photos" && <Photos data={data} />}{" "}
             {tab === "supplies" && <Supplies data={data} />}{" "}
-            {tab === "me" && <Me data={data} onRecord={openRecord} />}
+            {tab === "me" && (
+              <Me data={data} onRecord={openRecord} updates={updates} />
+            )}
           </div>
         </div>
         <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md h-16 bg-[#FFFDF6]/95 border-t border-[#264653]/10 grid grid-cols-5 z-20">
@@ -314,6 +422,12 @@ function MainApp() {
         )}
         {cardsOpen && data.selectedPet && (
           <CardsEditor data={data} onClose={() => setCardsOpen(false)} />
+        )}
+        {updates.noticeOpen && updates.release && (
+          <UpdateNotice
+            release={updates.release}
+            onClose={() => updates.setNoticeOpen(false)}
+          />
         )}
       </div>
     </div>
@@ -1832,9 +1946,11 @@ function SupplySheet({ data, onClose }: { data: Data; onClose: () => void }) {
 function Me({
   data,
   onRecord,
+  updates,
 }: {
   data: Data;
   onRecord: (t: RecordType) => void;
+  updates: UpdateController;
 }) {
   return (
     <div className="space-y-7 pb-2">
@@ -1845,11 +1961,17 @@ function Me({
         selectedPet={data.selectedPet}
         onRecord={onRecord}
       />
-      <SettingsSection data={data} />
+      <SettingsSection data={data} updates={updates} />
     </div>
   );
 }
-function SettingsSection({ data }: { data: Data }) {
+function SettingsSection({
+  data,
+  updates,
+}: {
+  data: Data;
+  updates: UpdateController;
+}) {
   return (
     <section className="space-y-3">
       <div className="px-5">
@@ -1862,8 +1984,184 @@ function SettingsSection({ data }: { data: Data }) {
         </p>
       </div>
       <FamilyProfileCard data={data} />
+      <UpdateSettingsCard updates={updates} />
       <DataBackup data={data} />
     </section>
+  );
+}
+
+function formatCheckTime(value: string | null) {
+  if (!value) return "尚未检查";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "尚未检查";
+  return date.toLocaleString("zh-CN", {
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+}
+
+function releaseNotes(notes: string) {
+  if (!notes) return "前往 GitHub 查看完整更新内容和安装包。";
+  return notes.length > 420 ? `${notes.slice(0, 420).trim()}…` : notes;
+}
+
+function UpdateSettingsCard({ updates }: { updates: UpdateController }) {
+  const [openError, setOpenError] = useState("");
+  const available = updates.status === "available" && updates.release;
+  const open = async (url: string) => {
+    setOpenError("");
+    try {
+      await openReleasePage(url);
+    } catch {
+      setOpenError("无法打开系统浏览器，请稍后重试");
+    }
+  };
+  return (
+    <section className="px-5">
+      <div className="relative overflow-hidden rounded-[1.75rem] bg-[#264653] p-4 text-[#FFFDF6] shadow-sm">
+        <span className="absolute -right-10 -top-14 h-36 w-36 rounded-full bg-[#A8DADC]/10" />
+        <span className="absolute -bottom-16 left-24 h-28 w-28 rounded-full bg-[#F4A261]/8" />
+        <div className="relative flex items-start gap-3">
+          <span className="w-10 h-10 rounded-2xl bg-white/10 text-[#A8DADC] grid place-items-center shrink-0">
+            <BellRing size={20} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <h2 className="font-bold">应用更新</h2>
+                <p className="text-[10px] text-white/50 mt-0.5">
+                  当前版本 {__APP_VERSION__}
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={updates.autoEnabled}
+                aria-label="每天自动检查更新"
+                onClick={() => updates.setAutoEnabled(!updates.autoEnabled)}
+                className={`relative h-7 w-12 shrink-0 overflow-hidden rounded-full border transition-colors ${updates.autoEnabled ? "border-[#A8DADC]/30 bg-[#2A7F83]" : "border-white/10 bg-white/15"}`}
+              >
+                <span
+                  className={`absolute left-1 top-1 h-5 w-5 rounded-full bg-[#FFFDF6] shadow-sm transition-transform duration-200 ${updates.autoEnabled ? "translate-x-5" : "translate-x-0"}`}
+                />
+              </button>
+            </div>
+            <p className="text-[11px] text-white/65 mt-2">
+              每天自动检查一次
+              <span className="text-[#A8DADC]/75">
+                {updates.autoEnabled ? " · 已开启" : " · 已关闭"}
+              </span>
+            </p>
+          </div>
+        </div>
+
+        <div className="relative mt-3 rounded-2xl border border-white/5 bg-white/8 p-3">
+          <div className="flex items-center justify-between gap-3 text-[10px]">
+            <span className="text-white/45">
+              上次检查：{formatCheckTime(updates.lastCheckAt)}
+            </span>
+            {updates.status === "error" && (
+              <span className="flex items-center gap-1 text-[#FF9B7A]">
+                <WifiOff size={12} /> 连接失败
+              </span>
+            )}
+          </div>
+          {updates.message && (
+            <p
+              className={`mt-1.5 text-xs ${updates.status === "error" ? "text-[#FF9B7A]" : updates.status === "available" ? "font-semibold text-[#F4A261]" : "text-white/70"}`}
+            >
+              {updates.message}
+            </p>
+          )}
+          {available && (
+            <p className="mt-1 text-[10px] leading-relaxed text-white/45 line-clamp-3 whitespace-pre-line">
+              {releaseNotes(available.notes)}
+            </p>
+          )}
+        </div>
+
+        <div className="relative grid grid-cols-2 gap-2 mt-3">
+          <button
+            type="button"
+            disabled={updates.status === "checking"}
+            onClick={() => void updates.check(false)}
+            className="rounded-2xl bg-[#FFFDF6] text-[#264653] py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
+          >
+            <RefreshCw
+              size={15}
+              className={updates.status === "checking" ? "animate-spin" : ""}
+            />
+            {updates.status === "checking" ? "检查中" : "手动检查"}
+          </button>
+          <button
+            type="button"
+            disabled={!available}
+            onClick={() => available && void open(available.url)}
+            className="rounded-2xl bg-[#F4A261] text-white py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 disabled:bg-white/10 disabled:text-white/25"
+          >
+            <ArrowUpRight size={15} />
+            前往 GitHub
+          </button>
+        </div>
+        <p className="relative text-[9px] text-white/35 mt-2 leading-relaxed">
+          仅访问 GitHub 的公开版本信息，不上传宠物数据；下载和安装由系统浏览器完成。
+        </p>
+        {openError && <p className="relative text-[10px] text-[#FF9B7A] mt-1">{openError}</p>}
+      </div>
+    </section>
+  );
+}
+
+function UpdateNotice({
+  release,
+  onClose,
+}: {
+  release: ReleaseInfo;
+  onClose: () => void;
+}) {
+  const [error, setError] = useState("");
+  const download = async () => {
+    setError("");
+    try {
+      await openReleasePage(release.url);
+    } catch {
+      setError("无法打开系统浏览器，请稍后到 GitHub Release 页面下载");
+    }
+  };
+  return (
+    <Sheet title="发现新版本" onClose={onClose}>
+      <div className="pt-5">
+        <div className="rounded-[1.75rem] bg-[#264653] p-5 text-white overflow-hidden relative">
+          <span className="absolute -right-8 -top-10 h-32 w-32 rounded-full bg-[#A8DADC]/15" />
+          <div className="relative">
+            <span className="inline-flex rounded-full bg-[#F4A261] px-3 py-1 text-[10px] font-semibold">
+              NEW · {release.version}
+            </span>
+            <h3 className="mt-3 text-xl font-bold">{release.title}</h3>
+            <p className="mt-3 max-h-48 overflow-y-auto whitespace-pre-line text-xs leading-relaxed text-white/70">
+              {releaseNotes(release.notes)}
+            </p>
+          </div>
+        </div>
+        <button
+          type="button"
+          onClick={() => void download()}
+          className="mt-4 w-full rounded-2xl bg-[#F4A261] py-3 text-sm font-bold text-white flex items-center justify-center gap-2"
+        >
+          <ArrowUpRight size={18} />
+          前往 GitHub 下载
+        </button>
+        <p className="mt-2 text-center text-[10px] text-[#264653]/45">
+          将打开系统浏览器，本应用不会静默下载或安装更新
+        </p>
+        {error && (
+          <p className="mt-2 text-center text-[10px] text-[#C0452B]">{error}</p>
+        )}
+      </div>
+    </Sheet>
   );
 }
 function FamilyProfileCard({ data }: { data: Data }) {

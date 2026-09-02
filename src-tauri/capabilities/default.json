@@ -10,6 +10,14 @@
     "dialog:default",
     "fs:allow-read-text-file",
     "fs:allow-write-text-file",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        {
+          "url": "https://github.com/husterhyx/pet-observation-assistant/releases/**"
+        }
+      ]
+    },
     "sql:default",
     "sql:allow-execute"
   ]
