@@ -1,30 +1,77 @@
-import { useMemo, useRef, useState } from 'react'
+import { useRef, useState } from "react";
 import {
-  DndContext, KeyboardSensor, PointerSensor, TouchSensor, closestCenter,
-  useSensor, useSensors, type DragEndEvent,
-} from '@dnd-kit/core'
+  DndContext,
+  PointerSensor,
+  TouchSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
 import {
-  SortableContext, arrayMove, sortableKeyboardCoordinates, useSortable,
+  SortableContext,
+  arrayMove,
+  useSortable,
   verticalListSortingStrategy,
-} from '@dnd-kit/sortable'
-import { CSS } from '@dnd-kit/utilities'
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import {
-  Bone, Droplets, Footprints, Bath, Scissors, Bean, Scale, Syringe, Bug,
-  HeartPulse, Stethoscope, Pill, Smile, NotebookPen, Flag, Plus, Trash2,
-  Camera, X, Dog, Cake, Pencil, PawPrint, Package, ShoppingCart, AlarmClock, Zap,
-  RefreshCw, CheckCircle2, AlertCircle, ImagePlus, SlidersHorizontal,
-  GripVertical, DatabaseBackup, Download, Upload,
-} from 'lucide-react'
-import { useDogData } from '@/hooks/useDogData'
-import { parsePetBackupText } from '@contracts/backup'
-import { pickBackupText, saveBackupText } from '@/lib/backup-file'
+  Bath,
+  Bone,
+  Bug,
+  Camera,
+  Cat,
+  CheckCircle2,
+  DatabaseBackup,
+  Dog,
+  Download,
+  Droplets,
+  Flag,
+  Footprints,
+  HeartPulse,
+  ImagePlus,
+  NotebookPen,
+  Package,
+  PawPrint,
+  Pencil,
+  Pill,
+  Plus,
+  RefreshCw,
+  Scale,
+  Scissors,
+  Smile,
+  Stethoscope,
+  Syringe,
+  Trash2,
+  Upload,
+  X,
+  Zap,
+  Bean,
+  SlidersHorizontal,
+  Archive,
+  ArchiveRestore,
+  Users,
+  GripVertical,
+  AlarmClock,
+} from "lucide-react";
+import { usePetData, type HomeCardType } from "@/hooks/usePetData";
+import { parsePetBackupText } from "@contracts/backup";
+import { pickBackupText, saveBackupText } from "@/lib/backup-file";
 import {
-  RECORD_TYPE_META, RECORD_GROUPS, SUPPLY_CATEGORIES, STOCK_META, expiryInfo,
-  type DailyPhoto, type DogProfile, type DogRecord, type RecordType,
-  type StockLevel, type SupplyItem,
-} from '@/types'
+  RECORD_GROUPS,
+  RECORD_TYPE_META,
+  STOCK_META,
+  SUPPLY_CATEGORIES,
+  expiryInfo,
+  type PetProfile,
+  type PetRecord,
+  type PetSpecies,
+  type RecordType,
+  type StockLevel,
+  type SupplyItem,
+} from "@/types";
 
-const TYPE_ICON: Record<RecordType, typeof Bone> = {
+const ICONS: Record<RecordType, typeof Bone> = {
   feed: Bone,
   water: Droplets,
   walk: Footprints,
@@ -40,1471 +87,1614 @@ const TYPE_ICON: Record<RecordType, typeof Bone> = {
   mood: Smile,
   note: NotebookPen,
   milestone: Flag,
+};
+const COLORS: Record<RecordType, string> = {
+  feed: "bg-[#F4A261]/15 text-[#C76E2B]",
+  water: "bg-[#A8DADC]/40 text-[#2A7F83]",
+  walk: "bg-[#A8DADC]/40 text-[#2A7F83]",
+  weight: "bg-[#E9C46A]/25 text-[#9A7B1E]",
+  bath: "bg-[#A8DADC]/40 text-[#2A7F83]",
+  groom: "bg-[#A8DADC]/40 text-[#2A7F83]",
+  poop: "bg-[#F4A261]/15 text-[#C76E2B]",
+  vaccine: "bg-[#F4A261]/15 text-[#C76E2B]",
+  deworm: "bg-[#A8DADC]/40 text-[#2A7F83]",
+  checkup: "bg-[#A8DADC]/40 text-[#2A7F83]",
+  vet: "bg-[#E76F51]/15 text-[#C0452B]",
+  meds: "bg-[#E76F51]/15 text-[#C0452B]",
+  mood: "bg-[#E9C46A]/25 text-[#9A7B1E]",
+  note: "bg-[#264653]/10 text-[#264653]",
+  milestone: "bg-[#E9C46A]/30 text-[#9A7B1E]",
+};
+const QUICK: RecordType[] = ["feed", "water", "walk", "poop"];
+const HOME_OPTIONS: HomeCardType[] = [
+  "walk",
+  "weight",
+  "bath",
+  "groom",
+  "deworm",
+  "vaccine",
+  "checkup",
+  "vet",
+  "meds",
+  "mood",
+  "note",
+  "milestone",
+];
+type Tab = "diary" | "photos" | "supplies" | "me";
+type Data = ReturnType<typeof usePetData>;
+
+function speciesText(species: PetSpecies) {
+  return species === "cat" ? "猫咪" : "狗狗";
 }
-
-const TYPE_COLOR: Record<RecordType, string> = {
-  feed: 'bg-[#F4A261]/15 text-[#C76E2B]',
-  water: 'bg-[#A8DADC]/40 text-[#2A7F83]',
-  walk: 'bg-[#A8DADC]/40 text-[#2A7F83]',
-  weight: 'bg-[#E9C46A]/25 text-[#9A7B1E]',
-  bath: 'bg-[#A8DADC]/40 text-[#2A7F83]',
-  groom: 'bg-[#A8DADC]/40 text-[#2A7F83]',
-  poop: 'bg-[#F4A261]/15 text-[#C76E2B]',
-  vaccine: 'bg-[#F4A261]/15 text-[#C76E2B]',
-  deworm: 'bg-[#A8DADC]/40 text-[#2A7F83]',
-  checkup: 'bg-[#A8DADC]/40 text-[#2A7F83]',
-  vet: 'bg-[#E76F51]/15 text-[#C0452B]',
-  meds: 'bg-[#E76F51]/15 text-[#C0452B]',
-  mood: 'bg-[#E9C46A]/25 text-[#9A7B1E]',
-  note: 'bg-[#264653]/10 text-[#264653]',
-  milestone: 'bg-[#E9C46A]/30 text-[#9A7B1E]',
+function typeMeta(type: RecordType, species?: PetSpecies) {
+  if (type === "walk" && species === "cat")
+    return {
+      ...RECORD_TYPE_META.walk,
+      label: "玩耍",
+      placeholder: "玩了什么？活动了多久？",
+    };
+  if (type === "groom" && species === "cat")
+    return {
+      ...RECORD_TYPE_META.groom,
+      placeholder: "梳毛、剪指甲、清理耳朵……",
+    };
+  return RECORD_TYPE_META[type];
 }
-
-/** 一键打卡：点一下立刻记一条 */
-const QUICK_TYPES: RecordType[] = ['feed', 'water', 'walk', 'poop']
-type HomeCardType = Exclude<RecordType, 'feed' | 'water' | 'poop'>
-
-/** 需要填写详情才能形成有效统计的记录入口 */
-const HOME_CARD_OPTIONS: { type: HomeCardType; label: string }[] = [
-  { type: 'walk', label: '遛弯时长' },
-  { type: 'weight', label: '体重趋势' },
-  { type: 'bath', label: '洗澡' },
-  { type: 'groom', label: '美容' },
-  { type: 'deworm', label: '驱虫' },
-  { type: 'vaccine', label: '疫苗' },
-  { type: 'checkup', label: '体检' },
-  { type: 'vet', label: '就医' },
-  { type: 'meds', label: '用药' },
-  { type: 'mood', label: '心情' },
-  { type: 'note', label: '随手记' },
-  { type: 'milestone', label: '大事件' },
-]
-
-function homeCardOption(type: HomeCardType) {
-  return HOME_CARD_OPTIONS.find(option => option.type === type)!
+function petById(pets: PetProfile[], id: string) {
+  return pets.find(p => p.id === id);
 }
-
-type Tab = 'diary' | 'photos' | 'supplies' | 'me'
-
-function fmtDate(iso: string) {
-  const d = new Date(iso)
-  const today = new Date()
-  const yest = new Date(today)
-  yest.setDate(today.getDate() - 1)
-  const sameDay = (a: Date, b: Date) =>
-    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
-  const time = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  if (sameDay(d, today)) return { label: '今天', time }
-  if (sameDay(d, yest)) return { label: '昨天', time }
-  return { label: `${d.getMonth() + 1}月${d.getDate()}日`, time }
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
-
-function todayKey() {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+function formatTime(value: string) {
+  const d = new Date(value);
+  return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
-
-function calcAge(birthday: string) {
-  if (!birthday) return ''
-  const b = new Date(birthday)
-  const now = new Date()
-  let months = (now.getFullYear() - b.getFullYear()) * 12 + now.getMonth() - b.getMonth()
-  if (now.getDate() < b.getDate()) months -= 1
-  if (months < 0) return ''
-  if (months < 12) return `${months} 个月大`
-  return `${Math.floor(months / 12)} 岁${months % 12 ? ` ${months % 12} 个月` : ''}`
+function localDateTimeValue(date = new Date()) {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+  return local.toISOString().slice(0, 16);
 }
-
-function daysTogether(homeDate: string) {
-  if (!homeDate) return ''
-  const days = Math.floor((+new Date(new Date().toDateString()) - +new Date(homeDate)) / 86400000)
-  return days >= 0 ? `相伴第 ${days + 1} 天` : ''
-}
-
-function readImage(f: File | undefined, cb: (dataUrl: string) => void, onError?: () => void) {
-  if (!f) return
-  const image = new Image()
-  const objectUrl = URL.createObjectURL(f)
-  image.onload = () => {
-    const scale = Math.min(1, 2048 / Math.max(image.naturalWidth, image.naturalHeight))
-    const canvas = document.createElement('canvas')
-    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale))
-    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale))
-    canvas.getContext('2d')?.drawImage(image, 0, 0, canvas.width, canvas.height)
-    URL.revokeObjectURL(objectUrl)
-    cb(canvas.toDataURL('image/jpeg', 0.82))
-  }
-  image.onerror = () => {
-    URL.revokeObjectURL(objectUrl)
-    onError?.()
-  }
-  image.src = objectUrl
+function imageFromFile(file: File | undefined) {
+  return new Promise<string>((resolve, reject) => {
+    if (!file) return reject(new Error("未选择图片"));
+    const image = new Image();
+    const url = URL.createObjectURL(file);
+    image.onload = () => {
+      const scale = Math.min(
+        1,
+        2048 / Math.max(image.naturalWidth, image.naturalHeight)
+      );
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+      canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+      canvas
+        .getContext("2d")
+        ?.drawImage(image, 0, 0, canvas.width, canvas.height);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL("image/jpeg", 0.82));
+    };
+    image.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("图片读取失败"));
+    };
+    image.src = url;
+  });
 }
 
 export default function Home() {
-  return <MainApp />
+  return <MainApp />;
 }
-
-function Splash({ text }: { text: string }) {
-  return (
-    <div className="min-h-dvh bg-[#F5F0E1] flex flex-col items-center justify-center gap-3 text-[#264653]/60">
-      <PawPrint size={40} className="text-[#F4A261] animate-pulse" />
-      <p className="text-sm">{text}</p>
-    </div>
-  )
-}
-
 function MainApp() {
-  const data = useDogData()
-  const [tab, setTab] = useState<Tab>('diary')
-  const [sheetOpen, setSheetOpen] = useState(false)
-  const [sheetType, setSheetType] = useState<RecordType>('feed')
-  const [cardsEditorOpen, setCardsEditorOpen] = useState(false)
-
-  const openRecordSheet = (type: RecordType = 'feed') => {
-    setSheetType(type)
-    setSheetOpen(true)
-  }
-
-  if (data.isLoading) return <Splash text="正在打开本地数据…" />
-
+  const data = usePetData();
+  const [tab, setTab] = useState<Tab>("diary");
+  const [recordType, setRecordType] = useState<RecordType>();
+  const [cardsOpen, setCardsOpen] = useState(false);
+  if (data.isLoading)
+    return (
+      <div className="min-h-dvh bg-[#F5F0E1] grid place-items-center text-[#264653]/60">
+        <PawPrint className="animate-pulse" size={40} />
+      </div>
+    );
+  if (!data.activePets.length) return <EmptyPets data={data} />;
+  const openRecord = (type: RecordType) => setRecordType(type);
   return (
     <div className="min-h-dvh bg-[#F5F0E1] text-[#264653] flex justify-center">
-      <div className="w-full max-w-md relative pb-28">
-        <Header profile={data.profile} recordCount={data.records.length} />
-
-        {tab === 'diary' && (
+      <div className="w-full max-w-md pb-24">
+        <Header data={data} />
+        <PetFilter data={data} />
+        {tab === "diary" && (
           <>
-            <QuickRecord
-              onQuick={t => data.addRecord({
-                type: t,
-                title: RECORD_TYPE_META[t].label,
-                note: '',
-                time: new Date().toISOString(),
-              })}
-              onDetailed={openRecordSheet}
-              cards={data.homeCardTypes}
-              onEditCards={() => setCardsEditorOpen(true)}
+            <QuickPanel
+              data={data}
+              onDetailed={openRecord}
+              onEditCards={() => setCardsOpen(true)}
             />
-            <Timeline records={data.records} onDelete={data.removeRecord} />
+            <Timeline
+              records={data.records}
+              pets={data.activePets}
+              onDelete={data.removeRecord}
+            />
           </>
         )}
-        {tab === 'photos' && (
-          <DailyPhotos
-            photos={data.photos}
-            dogName={data.profile.name}
-            onSave={data.setDailyPhoto}
-            onDelete={data.removeDailyPhoto}
+        {tab === "photos" && <Photos data={data} />}{" "}
+        {tab === "supplies" && <Supplies data={data} />}{" "}
+        {tab === "me" && <Me data={data} onRecord={openRecord} />}
+        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md h-16 bg-[#FFFDF6]/95 border-t border-[#264653]/10 grid grid-cols-5 z-20">
+          <Nav
+            active={tab === "diary"}
+            label="日记"
+            icon={NotebookPen}
+            onClick={() => setTab("diary")}
           />
-        )}
-        {tab === 'supplies' && (
-          <Supplies
-            supplies={data.supplies}
-            onAdd={data.addSupply}
-            onUpdate={data.updateSupply}
-            onDelete={data.removeSupply}
+          <Nav
+            active={tab === "photos"}
+            label="每日一萌"
+            icon={PawPrint}
+            onClick={() => setTab("photos")}
           />
-        )}
-        {tab === 'me' && (
-          <>
-            <ProfilePage profile={data.profile} onSave={data.setProfile} />
-            <div className="px-5 mt-8 mb-2 flex items-center gap-3">
-              <div className="h-px flex-1 bg-[#264653]/10" />
-              <span className="text-xs text-[#264653]/40">统计</span>
-              <div className="h-px flex-1 bg-[#264653]/10" />
-            </div>
-            <Stats records={data.records} onAddRecord={openRecordSheet} />
-            <DataBackup data={data} />
-          </>
-        )}
-
-        {/* 底部导航：日记 · 每日一萌 · ➕ · 物品 · 我的 */}
-        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-[#FFFDF6]/95 backdrop-blur border-t border-[#264653]/10 z-20">
-          <div className="grid grid-cols-5 items-center h-16">
-            <NavItem active={tab === 'diary'} onClick={() => setTab('diary')} label="日记" icon={NotebookPen} />
-            <NavItem active={tab === 'photos'} onClick={() => setTab('photos')} label="每日一萌" icon={PawPrint} />
-            <button
-              onClick={() => openRecordSheet()}
-              className="justify-self-center -mt-8 w-14 h-14 rounded-full bg-[#F4A261] text-white shadow-lg shadow-[#F4A261]/40 flex items-center justify-center active:scale-95 transition"
-              aria-label="记一笔"
-            >
-              <Plus size={28} strokeWidth={2.5} />
-            </button>
-            <NavItem active={tab === 'supplies'} onClick={() => setTab('supplies')} label="物品" icon={Package} />
-            <NavItem active={tab === 'me'} onClick={() => setTab('me')} label="我的" icon={Dog} />
-          </div>
+          <button
+            onClick={() => openRecord("feed")}
+            className="justify-self-center self-center -mt-8 w-14 h-14 rounded-full bg-[#F4A261] text-white grid place-items-center shadow-lg"
+          >
+            <Plus />
+          </button>
+          <Nav
+            active={tab === "supplies"}
+            label="物品"
+            icon={Package}
+            onClick={() => setTab("supplies")}
+          />
+          <Nav
+            active={tab === "me"}
+            label="我的"
+            icon={Users}
+            onClick={() => setTab("me")}
+          />
         </nav>
-
-        {sheetOpen && (
-          <AddSheet
-            initialType={sheetType}
-            defaultName={data.profile.name}
-            onClose={() => setSheetOpen(false)}
-            onSubmit={r => { data.addRecord(r); setSheetOpen(false); setTab('diary') }}
-          />
-        )}
-        {cardsEditorOpen && (
-          <HomeCardsEditor
-            selected={data.homeCardTypes}
-            onClose={() => setCardsEditorOpen(false)}
-            onSave={async types => {
-              await data.setHomeCards(types)
-              setCardsEditorOpen(false)
+        {recordType && (
+          <RecordSheet
+            data={data}
+            initialType={recordType}
+            onClose={() => setRecordType(undefined)}
+            onSaved={() => {
+              setRecordType(undefined);
+              setTab("diary");
             }}
           />
         )}
+        {cardsOpen && data.selectedPet && (
+          <CardsEditor data={data} onClose={() => setCardsOpen(false)} />
+        )}
       </div>
     </div>
-  )
+  );
 }
-
-function NavItem({ active, onClick, label, icon: Icon }: {
-  active: boolean; onClick: () => void; label: string; icon: typeof Bone
+function Nav({
+  active,
+  label,
+  icon: Icon,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  icon: typeof Bone;
+  onClick: () => void;
 }) {
   return (
-    <button onClick={onClick} className={`flex flex-col items-center gap-0.5 py-2 ${active ? 'text-[#F4A261]' : 'text-[#264653]/50'}`}>
+    <button
+      onClick={onClick}
+      className={`flex flex-col items-center justify-center text-[11px] ${active ? "text-[#F4A261]" : "text-[#264653]/50"}`}
+    >
       <Icon size={20} />
-      <span className="text-[11px]">{label}</span>
+      {label}
     </button>
-  )
+  );
 }
-
-function Header({ profile, recordCount }: { profile: DogProfile; recordCount: number }) {
+function Header({ data }: { data: Data }) {
+  const p = data.selectedPet;
   return (
-    <header className="px-5 pt-8 pb-4 flex items-center gap-4">
-      <div className="w-14 h-14 rounded-full bg-[#E8DCC4] flex items-center justify-center overflow-hidden shrink-0">
-        {profile.avatar
-          ? <img src={profile.avatar} alt="" className="w-full h-full object-cover" />
-          : <Dog size={26} className="text-[#264653]/60" />}
-      </div>
+    <header className="px-5 pt-7 pb-2 flex items-center gap-3">
+      <Avatar pet={p} size="lg" />
       <div className="min-w-0">
-        <h1 className="text-2xl font-bold tracking-wide truncate">
-          {profile.name ? `${profile.name}的小日子` : '小狗的小日子'}
+        <h1 className="text-2xl font-bold truncate">
+          {p ? `${p.name}的小日子` : "我家的毛孩子"}
         </h1>
-        <p className="text-sm text-[#264653]/60 mt-0.5">
-          {[
-            profile.birthday && calcAge(profile.birthday),
-            profile.breed || null,
-            profile.homeDate ? daysTogether(profile.homeDate) : null,
-            recordCount ? `已记录 ${recordCount} 条` : null,
-          ].filter(Boolean).join(' · ') || '开始记录它的每一天吧'}
+        <p className="text-sm text-[#264653]/55">
+          {p
+            ? `${speciesText(p.species)} · ${p.breed || "品种待填写"} · ${data.records.length} 条记录`
+            : `${data.activePets.length} 位家庭成员 · ${data.records.length} 条记录`}
         </p>
       </div>
     </header>
-  )
+  );
+}
+function Avatar({
+  pet,
+  size = "sm",
+}: {
+  pet?: PetProfile;
+  size?: "sm" | "lg";
+}) {
+  const Icon = pet?.species === "cat" ? Cat : Dog;
+  const cls = size === "lg" ? "w-14 h-14" : "w-9 h-9";
+  return (
+    <span
+      className={`${cls} rounded-full bg-[#E8DCC4] shrink-0 overflow-hidden grid place-items-center`}
+    >
+      {pet?.avatar ? (
+        <img src={pet.avatar} alt="" className="w-full h-full object-cover" />
+      ) : (
+        <Icon size={size === "lg" ? 27 : 19} className="text-[#264653]/55" />
+      )}
+    </span>
+  );
+}
+function PetFilter({ data }: { data: Data }) {
+  return (
+    <div className="px-5 pb-4 flex gap-2 overflow-x-auto">
+      <button
+        onClick={() => data.setSelectedPetId(undefined)}
+        className={`shrink-0 rounded-full px-3 py-2 text-xs ${!data.selectedPetId ? "bg-[#264653] text-white" : "bg-[#FFFDF6]"}`}
+      >
+        全部宠物
+      </button>
+      {data.activePets.map(p => (
+        <button
+          key={p.id}
+          onClick={() => data.setSelectedPetId(p.id)}
+          className={`shrink-0 flex items-center gap-1.5 rounded-full pr-3 pl-1 py-1 text-xs ${data.selectedPetId === p.id ? "bg-[#264653] text-white" : "bg-[#FFFDF6]"}`}
+        >
+          <Avatar pet={p} />
+          {p.name}
+        </button>
+      ))}
+    </div>
+  );
+}
+function EmptyPets({ data }: { data: Data }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="min-h-dvh bg-[#F5F0E1] text-[#264653] p-6 flex flex-col justify-center max-w-md mx-auto">
+      <div className="text-center">
+        <PawPrint size={52} className="mx-auto text-[#F4A261]" />
+        <h1 className="text-2xl font-bold mt-4">欢迎来到宠物生活记录</h1>
+        <p className="text-sm text-[#264653]/55 mt-2">
+          先创建一位家庭成员，开始记录猫咪或狗狗的生活。
+        </p>
+        <button
+          onClick={() => setOpen(true)}
+          className="mt-6 bg-[#F4A261] text-white rounded-2xl px-8 py-3 font-bold"
+        >
+          创建宠物
+        </button>
+      </div>
+      {data.pets.some(p => p.archivedAt) && (
+        <div className="mt-10">
+          <h2 className="font-bold mb-2">已归档宠物</h2>
+          {data.pets
+            .filter(p => p.archivedAt)
+            .map(p => (
+              <button
+                key={p.id}
+                onClick={() => data.restorePet(p.id)}
+                className="w-full bg-white rounded-2xl p-3 mb-2 flex justify-between"
+              >
+                <span>{p.name}</span>
+                <span>恢复</span>
+              </button>
+            ))}
+        </div>
+      )}
+      <DataBackup data={data} />
+      {open && (
+        <PetForm
+          onClose={() => setOpen(false)}
+          onSave={async p => {
+            await data.createPet(p);
+            setOpen(false);
+          }}
+        />
+      )}
+    </div>
+  );
 }
 
-/* ---------------- 一键打卡 ---------------- */
-
-function QuickRecord({ onQuick, onDetailed, cards, onEditCards }: {
-  onQuick: (t: RecordType) => void
-  onDetailed: (t: RecordType) => void
-  cards: HomeCardType[]
-  onEditCards: () => void
+function QuickPanel({
+  data,
+  onDetailed,
+  onEditCards,
+}: {
+  data: Data;
+  onDetailed: (t: RecordType) => void;
+  onEditCards: () => void;
 }) {
-  const [done, setDone] = useState<RecordType | null>(null)
+  const targetPet =
+    data.selectedPet ??
+    (data.activePets.length === 1 ? data.activePets[0] : undefined);
+  const species = targetPet?.species;
+  const [done, setDone] = useState<RecordType>();
+  const [notice, setNotice] = useState("");
+  const quickRecord = async (type: RecordType) => {
+    if (!targetPet) {
+      setNotice("请先在上方选择要记录的宠物");
+      return;
+    }
+    const meta = typeMeta(type, targetPet.species);
+    setNotice("");
+    await data.addRecord({
+      petId: targetPet.id,
+      type,
+      title: meta.label,
+      note: "",
+      time: new Date().toISOString(),
+    });
+    setDone(type);
+    window.setTimeout(
+      () => setDone(current => (current === type ? undefined : current)),
+      1200
+    );
+  };
   return (
     <section className="px-5 mb-5">
-      <div className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
-        <h2 className="text-xs font-semibold text-[#264653]/50 flex items-center gap-1 mb-2.5">
-          <Zap size={12} className="text-[#F4A261]" /> 一键打卡
+      <div className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm">
+        <h2 className="text-xs text-[#264653]/50 flex gap-1 mb-2">
+          <Zap size={13} className="text-[#F4A261]" />
+          一键打卡
         </h2>
         <div className="grid grid-cols-4 gap-2">
-          {QUICK_TYPES.map(t => {
-            const Icon = TYPE_ICON[t]
-            const justDone = done === t
+          {QUICK.map(t => {
+            const I = ICONS[t];
             return (
               <button
                 key={t}
-                onClick={() => {
-                  onQuick(t)
-                  setDone(t)
-                  setTimeout(() => setDone(d => (d === t ? null : d)), 1200)
-                }}
-                className={`flex flex-col items-center gap-1 py-2.5 rounded-2xl text-xs transition active:scale-95 ${
-                  justDone ? 'bg-[#F4A261] text-white font-semibold' : `${TYPE_COLOR[t]}`
-                }`}
+                onClick={() => void quickRecord(t)}
+                className={`rounded-2xl py-2.5 flex flex-col items-center text-xs gap-1 ${done === t ? "bg-[#F4A261] text-white" : COLORS[t]}`}
               >
-                <Icon size={20} />
-                {justDone ? '已记下✓' : RECORD_TYPE_META[t].label}
+                <I size={20} />
+                {done === t ? "已记下✓" : typeMeta(t, species).label}
               </button>
-            )
+            );
           })}
         </div>
-        <div className="h-px bg-[#264653]/8 my-3" />
-        <div className="flex items-center justify-between mb-2.5">
-          <h3 className="text-xs font-semibold text-[#264653]/50">健康与成长</h3>
-          <button
-            type="button"
-            onClick={onEditCards}
-            className="flex items-center gap-1 text-[11px] font-semibold text-[#C76E2B] px-2 py-1 rounded-full bg-[#F4A261]/12"
-          >
-            <SlidersHorizontal size={12} /> 编辑
-          </button>
-        </div>
-        <div className="grid grid-cols-3 gap-2">
-          {cards.map(type => {
-            const { label } = homeCardOption(type)
-            const Icon = TYPE_ICON[type]
-            return (
+        {notice && (
+          <p className="mt-2 text-center text-xs text-[#C0452B]">{notice}</p>
+        )}
+        <div className="border-t border-[#264653]/8 mt-3 pt-3">
+          <div className="flex justify-between mb-2">
+            <span className="text-xs text-[#264653]/50">健康与成长</span>
+            {data.selectedPet && (
               <button
-                key={label}
-                onClick={() => onDetailed(type)}
-                className="flex items-center justify-center gap-1.5 py-2.5 rounded-2xl text-xs bg-[#F5F0E1] text-[#264653]/75 transition active:scale-95"
+                onClick={onEditCards}
+                className="text-[11px] text-[#C76E2B] flex gap-1"
               >
-                <Icon size={16} className={TYPE_COLOR[type].split(' ')[1]} />
-                {label}
+                <SlidersHorizontal size={12} />
+                编辑同物种卡片
               </button>
-            )
-          })}
+            )}
+          </div>
+          {data.selectedPet ? (
+            <div className="grid grid-cols-3 gap-2">
+              {data.homeCardTypes.map(t => {
+                const I = ICONS[t];
+                return (
+                  <button
+                    key={t}
+                    onClick={() => onDetailed(t)}
+                    className="rounded-2xl bg-[#F5F0E1] py-2 text-xs flex justify-center gap-1"
+                  >
+                    <I size={15} />
+                    {t === "walk" && species === "cat"
+                      ? "活动时长"
+                      : typeMeta(t, species).label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="text-xs text-center text-[#264653]/40 py-2">
+              选择一只宠物后显示它的专属卡片
+            </p>
+          )}
         </div>
       </div>
     </section>
-  )
+  );
 }
-
-/* ---------------- 日记时间线 ---------------- */
-
-function Timeline({ records, onDelete }: { records: DogRecord[]; onDelete: (id: string) => void }) {
-  const groups = useMemo(() => {
-    const map = new Map<string, DogRecord[]>()
-    for (const r of records) {
-      const { label } = fmtDate(r.time)
-      const arr = map.get(label) ?? []
-      arr.push(r)
-      map.set(label, arr)
-    }
-    return [...map.entries()]
-  }, [records])
-
-  if (records.length === 0) {
-    return (
-      <div className="px-5 pt-16 text-center text-[#264653]/50">
-        <Dog size={48} className="mx-auto mb-4 opacity-40" />
-        <p className="font-medium">还没有记录</p>
-        <p className="text-sm mt-1">点击下方橙色按钮，记下它的第一件事吧</p>
-      </div>
-    )
-  }
-
-  return (
-    <div className="px-5 space-y-6">
-      {groups.map(([label, list]) => (
-        <section key={label}>
-          <h2 className="text-sm font-semibold text-[#264653]/50 mb-2">{label}</h2>
-          <div className="space-y-3">
-            {list.map(r => <RecordCard key={r.id} record={r} onDelete={() => onDelete(r.id)} />)}
-          </div>
-        </section>
-      ))}
-    </div>
-  )
-}
-
-function RecordCard({ record, onDelete }: { record: DogRecord; onDelete: () => void }) {
-  const Icon = TYPE_ICON[record.type]
-  const meta = RECORD_TYPE_META[record.type]
-  const { time } = fmtDate(record.time)
-  const isMilestone = record.type === 'milestone'
-  return (
-    <article className={`rounded-3xl p-4 shadow-sm shadow-[#264653]/5 ${
-      isMilestone ? 'bg-[#E9C46A]/20 border border-[#E9C46A]/60' : 'bg-[#FFFDF6]'
-    }`}>
-      <div className="flex items-start gap-3">
-        <div className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 ${TYPE_COLOR[record.type]}`}>
-          <Icon size={20} />
-        </div>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-baseline justify-between gap-2">
-            <h3 className="font-semibold">
-              {meta.label}
-              {record.value != null && (
-                <span className="ml-2 text-[#F4A261] font-bold">{record.value}{meta.unit ?? ''}</span>
-              )}
-            </h3>
-            <span className="text-xs text-[#264653]/40 shrink-0">{time}</span>
-          </div>
-          {record.note && <p className="text-sm text-[#264653]/75 mt-1 whitespace-pre-wrap break-words">{record.note}</p>}
-          {record.photo && (
-            <img src={record.photo} alt="" className="mt-2 rounded-2xl max-h-56 object-cover w-full" />
-          )}
-        </div>
-        <button onClick={onDelete} className="text-[#264653]/25 hover:text-[#E76F51] transition shrink-0 mt-1" aria-label="删除">
-          <Trash2 size={16} />
-        </button>
-      </div>
-    </article>
-  )
-}
-
-/* ---------------- 记一笔（底部弹层，分类分组） ---------------- */
-
-function AddSheet({ initialType, defaultName, onClose, onSubmit }: {
-  initialType?: RecordType
-  defaultName: string
-  onClose: () => void
-  onSubmit: (r: Omit<DogRecord, 'id'>) => void
+function Timeline({
+  records,
+  pets,
+  onDelete,
+}: {
+  records: PetRecord[];
+  pets: PetProfile[];
+  onDelete: (id: string) => unknown;
 }) {
-  const [type, setType] = useState<RecordType>(initialType ?? 'feed')
-  const [note, setNote] = useState('')
-  const [value, setValue] = useState('')
-  const [time, setTime] = useState(() => {
-    const d = new Date()
-    d.setMinutes(d.getMinutes() - d.getTimezoneOffset())
-    return d.toISOString().slice(0, 16)
-  })
-  const [photo, setPhoto] = useState<string | undefined>()
-  const fileRef = useRef<HTMLInputElement>(null)
-  const meta = RECORD_TYPE_META[type]
+  if (!records.length)
+    return (
+      <div className="text-center py-20 text-[#264653]/40">
+        <NotebookPen className="mx-auto mb-2" />
+        还没有记录
+      </div>
+    );
+  return (
+    <div className="px-5 space-y-3">
+      {records.map(r => {
+        const p = petById(pets, r.petId);
+        const I = ICONS[r.type];
+        const meta = typeMeta(r.type, p?.species);
+        return (
+          <article
+            key={r.id}
+            className="bg-[#FFFDF6] rounded-3xl p-4 flex gap-3"
+          >
+            <span
+              className={`w-10 h-10 rounded-2xl grid place-items-center shrink-0 ${COLORS[r.type]}`}
+            >
+              <I size={20} />
+            </span>
+            <div className="min-w-0 flex-1">
+              <div className="flex justify-between gap-2">
+                <h3 className="font-semibold">
+                  {meta.label}
+                  {r.value != null && (
+                    <b className="text-[#F4A261] ml-2">
+                      {r.value}
+                      {meta.unit}
+                    </b>
+                  )}
+                </h3>
+                <span className="text-[11px] text-[#264653]/40">
+                  {formatTime(r.time)}
+                </span>
+              </div>
+              {p && (
+                <p className="text-[11px] text-[#2A7F83] mt-0.5">{p.name}</p>
+              )}
+              {r.note && (
+                <p className="text-sm mt-1 whitespace-pre-wrap">{r.note}</p>
+              )}
+              {r.photo && (
+                <img
+                  src={r.photo}
+                  alt=""
+                  className="mt-2 rounded-2xl max-h-52 w-full object-cover"
+                />
+              )}
+            </div>
+            <button
+              onClick={() => onDelete(r.id)}
+              className="text-[#264653]/25"
+            >
+              <Trash2 size={16} />
+            </button>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
 
-  const submit = () => {
-    onSubmit({
+function RecordSheet({
+  data,
+  initialType,
+  onClose,
+  onSaved,
+}: {
+  data: Data;
+  initialType: RecordType;
+  onClose: () => void;
+  onSaved: () => void;
+}) {
+  const [petId, setPetId] = useState(data.selectedPetId ?? "");
+  const [type, setType] = useState(initialType);
+  const [note, setNote] = useState("");
+  const [value, setValue] = useState("");
+  const [time, setTime] = useState(() => localDateTimeValue());
+  const [photo, setPhoto] = useState<string>();
+  const [saving, setSaving] = useState(false);
+  const p = petById(data.activePets, petId);
+  const meta = typeMeta(type, p?.species);
+  const submit = async () => {
+    if (!petId) return;
+    setSaving(true);
+    await data.addRecord({
+      petId,
       type,
       title: meta.label,
       note: note.trim(),
       time: new Date(time).toISOString(),
       value: meta.unit && value ? Number(value) : undefined,
       photo,
-    })
-  }
-
+    });
+    onSaved();
+  };
   return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-[#264653]/40" />
-      <div
-        className="relative w-full max-w-md bg-[#FFFDF6] rounded-t-[2rem] p-5 pb-8 max-h-[88dvh] overflow-y-auto"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">记一笔{defaultName ? ` · ${defaultName}` : ''}</h2>
-          <button onClick={onClose} className="text-[#264653]/40" aria-label="关闭"><X size={22} /></button>
-        </div>
-
-        {/* 分组选择记录类型 */}
-        <div className="space-y-3 mb-4">
-          {RECORD_GROUPS.map(g => (
-            <div key={g.name}>
-              <p className="text-xs text-[#264653]/45 mb-1.5">{g.name}</p>
-              <div className="grid grid-cols-4 gap-2">
-                {g.types.map(t => {
-                  const Icon = TYPE_ICON[t]
-                  const active = t === type
-                  return (
-                    <button
-                      key={t}
-                      onClick={() => setType(t)}
-                      className={`flex flex-col items-center gap-1 py-2.5 rounded-2xl text-xs transition ${
-                        active ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/70'
-                      }`}
-                    >
-                      <Icon size={20} />
-                      {RECORD_TYPE_META[t].label}
-                    </button>
-                  )
-                })}
-              </div>
+    <Sheet onClose={onClose} title="记一笔">
+      <PetSelect pets={data.activePets} value={petId} onChange={setPetId} />
+      <div className="space-y-3 mt-4">
+        {RECORD_GROUPS.map(g => (
+          <div key={g.name}>
+            <p className="text-xs text-[#264653]/45 mb-1">{g.name}</p>
+            <div className="grid grid-cols-4 gap-2">
+              {g.types.map(t => {
+                const I = ICONS[t];
+                return (
+                  <button
+                    key={t}
+                    onClick={() => setType(t)}
+                    className={`rounded-xl py-2 flex flex-col items-center text-[11px] ${type === t ? "bg-[#F4A261] text-white" : "bg-[#F5F0E1]"}`}
+                  >
+                    <I size={17} />
+                    {typeMeta(t, p?.species).label}
+                  </button>
+                );
+              })}
             </div>
-          ))}
-        </div>
-
-        <div className="space-y-3">
-          <label className="block">
-            <span className="text-xs text-[#264653]/50">时间</span>
-            <input
-              type="datetime-local"
-              value={time}
-              onChange={e => setTime(e.target.value)}
-              className="mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40"
-            />
-          </label>
-
-          {meta.unit && (
-            <label className="block">
-              <span className="text-xs text-[#264653]/50">数值（{meta.unit}）</span>
-              <input
-                type="number"
-                inputMode="decimal"
-                step="any"
-                value={value}
-                onChange={e => setValue(e.target.value)}
-                placeholder={`多少 ${meta.unit}？`}
-                className="mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40"
-              />
-            </label>
-          )}
-
-          <label className="block">
-            <span className="text-xs text-[#264653]/50">备注</span>
-            <textarea
-              value={note}
-              onChange={e => setNote(e.target.value)}
-              placeholder={meta.placeholder}
-              rows={3}
-              className="mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40 resize-none"
-            />
-          </label>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="flex items-center gap-1.5 text-sm text-[#264653]/60 bg-[#F5F0E1] rounded-2xl px-4 py-2.5"
-            >
-              <Camera size={16} /> {photo ? '换一张' : '加照片'}
-            </button>
-            {photo && <img src={photo} alt="" className="h-12 w-12 rounded-xl object-cover" />}
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => readImage(e.target.files?.[0], setPhoto)} />
           </div>
-
-          <button
-            onClick={submit}
-            className="w-full bg-[#F4A261] text-white font-bold rounded-2xl py-3.5 active:scale-[0.98] transition"
-          >
-            保存
+        ))}
+        <label className="block text-xs text-[#264653]/55">
+          时间
+          <input
+            type="datetime-local"
+            step={60}
+            value={time}
+            onChange={event => setTime(event.target.value)}
+            className="field mt-1"
+          />
+        </label>
+        {meta.unit && (
+          <input
+            type="number"
+            value={value}
+            onChange={e => setValue(e.target.value)}
+            placeholder={`数值（${meta.unit}）`}
+            className="field"
+          />
+        )}
+        <textarea
+          value={note}
+          onChange={e => setNote(e.target.value)}
+          placeholder={meta.placeholder}
+          rows={3}
+          className="field"
+        />
+        <ImagePicker value={photo} onChange={setPhoto} />
+        <button
+          disabled={!petId || saving}
+          onClick={() => void submit()}
+          className="primary"
+        >
+          {saving ? "保存中…" : "保存"}
+        </button>
+        {!petId && (
+          <p className="text-xs text-[#C0452B] text-center">请先选择宠物</p>
+        )}
+      </div>
+    </Sheet>
+  );
+}
+function PetSelect({
+  pets,
+  value,
+  onChange,
+  allowShared = false,
+}: {
+  pets: PetProfile[];
+  value: string;
+  onChange: (v: string) => void;
+  allowShared?: boolean;
+}) {
+  return (
+    <label className="block text-xs text-[#264653]/55">
+      归属
+      <select
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        className="field mt-1"
+      >
+        <option value="">{allowShared ? "全家共用" : "请选择宠物"}</option>
+        {pets.map(p => (
+          <option key={p.id} value={p.id}>
+            {p.name}（{speciesText(p.species)}）
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+function ImagePicker({
+  value,
+  onChange,
+}: {
+  value?: string;
+  onChange: (v: string) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div>
+      <button
+        onClick={() => input.current?.click()}
+        className="bg-[#F5F0E1] rounded-2xl px-4 py-2 text-sm flex gap-1"
+      >
+        <Camera size={16} />
+        {busy ? "正在处理…" : value ? "更换照片" : "添加照片"}
+      </button>
+      {value && (
+        <img src={value} className="mt-2 h-20 rounded-xl object-cover" />
+      )}
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={e => {
+          setBusy(true);
+          void imageFromFile(e.target.files?.[0])
+            .then(onChange)
+            .finally(() => setBusy(false));
+        }}
+      />
+    </div>
+  );
+}
+function Sheet({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-40 flex items-end justify-center"
+      onClick={onClose}
+    >
+      <div className="absolute inset-0 bg-[#264653]/40" />
+      <section
+        onClick={e => e.stopPropagation()}
+        className="relative w-full max-w-md bg-[#FFFDF6] rounded-t-[2rem] p-5 pb-8 max-h-[90dvh] overflow-y-auto"
+      >
+        <div className="flex justify-between">
+          <h2 className="text-lg font-bold">{title}</h2>
+          <button onClick={onClose}>
+            <X />
           </button>
         </div>
-      </div>
+        {children}
+      </section>
     </div>
-  )
+  );
 }
 
-/* ---------------- 每日一萌 ---------------- */
-
-function DailyPhotos({ photos, dogName, onSave, onDelete }: {
-  photos: DailyPhoto[]
-  dogName: string
-  onSave: (date: string, photo: string, caption: string) => Promise<void>
-  onDelete: (id: string) => void
-}) {
-  const today = todayKey()
-  const todayPhoto = photos.find(p => p.date === today)
-  const past = photos.filter(p => p.date !== today)
-  const [draft, setDraft] = useState<string | undefined>()
-  const [caption, setCaption] = useState('')
-  const [editing, setEditing] = useState(false)
-  const [preparing, setPreparing] = useState(false)
-  const [saving, setSaving] = useState(false)
-  const [saveError, setSaveError] = useState('')
-  const galleryRef = useRef<HTMLInputElement>(null)
-  const cameraRef = useRef<HTMLInputElement>(null)
-  const busy = preparing || saving
-
-  const startEdit = () => {
-    setDraft(todayPhoto?.photo)
-    setCaption(todayPhoto?.caption ?? '')
-    setEditing(true)
-  }
-
-  const savePhoto = async () => {
-    if (!draft || busy) return
-    setSaving(true)
-    setSaveError('')
-    try {
-      await Promise.all([
-        onSave(today, draft, caption.trim()),
-        new Promise(resolve => window.setTimeout(resolve, 500)),
-      ])
-      setEditing(false)
-      setDraft(undefined)
-      setCaption('')
-    } catch {
-      setSaveError('保存失败，请重试')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const preparePhoto = (file: File | undefined) => {
-    if (!file || busy) return
-    const startedAt = Date.now()
-    setPreparing(true)
-    setSaveError('')
-    readImage(file, photo => {
-      window.setTimeout(() => {
-        setDraft(photo)
-        setPreparing(false)
-      }, Math.max(0, 500 - (Date.now() - startedAt)))
-    }, () => {
-      setPreparing(false)
-      setSaveError('无法读取这张照片，请重新选择')
-    })
-  }
-
+function Photos({ data }: { data: Data }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="px-5 space-y-6">
-      <div>
-        <h2 className="text-lg font-bold">每日一萌</h2>
-        <p className="text-xs text-[#264653]/50 mt-0.5">每天一张，攒下{dogName ? `「${dogName}」的` : '它的'}可爱</p>
-      </div>
-
-      {todayPhoto && !editing ? (
-        <figure className="bg-[#FFFDF6] rounded-3xl p-3 shadow-sm shadow-[#264653]/5">
-          <img src={todayPhoto.photo} alt="" className="rounded-2xl w-full max-h-80 object-cover" />
-          <figcaption className="flex items-center justify-between px-2 pt-2.5 pb-1">
-            <span className="text-sm text-[#264653]/70">{todayPhoto.caption || '今天的它'}</span>
-            <div className="flex gap-3 text-[#264653]/40">
-              <button onClick={startEdit} aria-label="更换"><Pencil size={16} /></button>
-              <button onClick={() => onDelete(todayPhoto.id)} aria-label="删除"><Trash2 size={16} /></button>
-            </div>
-          </figcaption>
-        </figure>
-      ) : (
-        <div className="bg-[#FFFDF6] rounded-3xl p-5 shadow-sm shadow-[#264653]/5">
-          <div className="relative w-full aspect-[4/3] rounded-2xl border-2 border-dashed border-[#F4A261]/40 bg-[#F5F0E1]/60 flex flex-col items-center justify-center gap-2 text-[#264653]/50 overflow-hidden">
-            {draft ? (
-              <img src={draft} alt="" className={`w-full h-full object-cover transition ${saving ? 'scale-[1.02]' : ''}`} />
-            ) : (
-              <>
-                <Camera size={32} className="text-[#F4A261]" />
-                <span className="text-sm font-medium">拍下或选一张今天的它</span>
-              </>
-            )}
-            {busy && (
-              <span className="absolute inset-0 bg-[#264653]/45 backdrop-blur-[1px] flex flex-col items-center justify-center gap-2 text-white" aria-live="polite">
-                <RefreshCw size={30} className="animate-spin" />
-                <span className="text-sm font-semibold animate-pulse">{preparing ? '正在处理照片…' : '正在保存照片…'}</span>
-              </span>
-            )}
-          </div>
-          <div className="grid grid-cols-2 gap-2 mt-3">
-            <button
-              type="button"
-              onClick={() => cameraRef.current?.click()}
-              disabled={busy}
-              className="flex items-center justify-center gap-1.5 rounded-2xl py-2.5 text-sm font-semibold bg-[#F4A261]/15 text-[#C76E2B] disabled:opacity-50"
-            >
-              <Camera size={16} /> 拍照
-            </button>
-            <button
-              type="button"
-              onClick={() => galleryRef.current?.click()}
-              disabled={busy}
-              className="flex items-center justify-center gap-1.5 rounded-2xl py-2.5 text-sm font-semibold bg-[#A8DADC]/35 text-[#2A7F83] disabled:opacity-50"
-            >
-              <ImagePlus size={16} /> 从相册选择
-            </button>
-          </div>
-          {draft && (
-            <div className="mt-3 space-y-2.5">
-              <input
-                value={caption}
-                onChange={e => setCaption(e.target.value)}
-                disabled={busy}
-                placeholder="给今天配一句话…"
-                className="w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40 disabled:opacity-60"
-              />
-              <button
-                onClick={savePhoto}
-                disabled={busy}
-                className="w-full bg-[#F4A261] text-white font-bold rounded-2xl py-3 active:enabled:scale-[0.98] transition disabled:opacity-80 flex items-center justify-center gap-2"
-              >
-                {saving && <RefreshCw size={17} className="animate-spin" />}
-                {saving ? '正在保存照片…' : '收下今日份的可爱'}
-              </button>
-              {saveError && <p className="text-xs text-center text-[#C0452B]" role="alert">{saveError}</p>}
-            </div>
-          )}
-          {!draft && saveError && <p className="text-xs text-center text-[#C0452B] mt-3" role="alert">{saveError}</p>}
-          <input
-            ref={cameraRef}
-            type="file"
-            accept="image/*"
-            capture="environment"
-            className="hidden"
-            onChange={e => { preparePhoto(e.target.files?.[0]); e.currentTarget.value = '' }}
-          />
-          <input
-            ref={galleryRef}
-            type="file"
-            accept="image/*"
-            className="hidden"
-            onChange={e => { preparePhoto(e.target.files?.[0]); e.currentTarget.value = '' }}
-          />
-        </div>
-      )}
-
-      {past.length > 0 && (
-        <section>
-          <h3 className="text-sm font-semibold text-[#264653]/50 mb-2">这些天的它</h3>
-          <div className="grid grid-cols-2 gap-3">
-            {past.map(p => (
-              <figure key={p.id} className="bg-[#FFFDF6] rounded-3xl p-2 shadow-sm shadow-[#264653]/5 group relative">
-                <img src={p.photo} alt="" className="rounded-2xl w-full aspect-square object-cover" />
-                <figcaption className="px-1.5 pt-1.5 pb-0.5">
-                  <p className="text-[11px] text-[#264653]/45">{Number(p.date.slice(5, 7))}月{Number(p.date.slice(8))}日</p>
-                  {p.caption && <p className="text-xs text-[#264653]/70 truncate">{p.caption}</p>}
-                </figcaption>
-                <button
-                  onClick={() => onDelete(p.id)}
-                  className="absolute top-3 right-3 w-6 h-6 rounded-full bg-[#264653]/50 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition"
-                  aria-label="删除"
-                >
-                  <Trash2 size={12} />
-                </button>
-              </figure>
-            ))}
-          </div>
-        </section>
-      )}
-    </div>
-  )
-}
-
-/* ---------------- 物品清单 ---------------- */
-
-function Supplies({ supplies, onAdd, onUpdate, onDelete }: {
-  supplies: SupplyItem[]
-  onAdd: (s: Omit<SupplyItem, 'id' | 'updatedAt'>) => void
-  onUpdate: (id: string, patch: Partial<SupplyItem>) => void
-  onDelete: (id: string) => void
-}) {
-  const [sheetOpen, setSheetOpen] = useState(false)
-  const restock = supplies.filter(s => s.stock !== 'plenty')
-  const expiring = supplies.filter(s => {
-    const e = expiryInfo(s)
-    return e && e.state !== 'ok'
-  })
-  const groups = useMemo(() => {
-    const map = new Map<string, SupplyItem[]>()
-    for (const cat of SUPPLY_CATEGORIES) map.set(cat, [])
-    for (const s of supplies) {
-      const arr = map.get(s.category) ?? []
-      arr.push(s)
-      map.set(s.category, arr)
-    }
-    return [...map.entries()].filter(([, list]) => list.length > 0)
-  }, [supplies])
-
-  return (
-    <div className="px-5 space-y-5">
-      <div className="flex items-center justify-between">
+    <div className="px-5">
+      <div className="flex justify-between items-center mb-4">
         <div>
-          <h2 className="text-lg font-bold">物品清单</h2>
-          <p className="text-xs text-[#264653]/50 mt-0.5">余量随手更新，补货不再忘</p>
+          <h2 className="text-lg font-bold">每日一萌</h2>
+          <p className="text-xs text-[#264653]/50">每只宠物每天一张</p>
         </div>
         <button
-          onClick={() => setSheetOpen(true)}
-          className="flex items-center gap-1 bg-[#F4A261] text-white text-sm font-semibold rounded-2xl px-4 py-2.5 active:scale-95 transition"
+          onClick={() => setOpen(true)}
+          className="bg-[#F4A261] text-white rounded-full px-4 py-2 text-sm flex gap-1"
         >
-          <Plus size={16} /> 添加
+          <ImagePlus size={16} />
+          添加
         </button>
       </div>
-
-      {/* 补货提醒 */}
-      {restock.length > 0 && (
-        <section className="bg-[#E76F51]/10 border border-[#E76F51]/25 rounded-3xl p-4">
-          <h3 className="font-semibold text-[#C0452B] flex items-center gap-1.5 mb-2">
-            <ShoppingCart size={16} /> 该补货啦
-          </h3>
-          <ul className="space-y-1.5">
-            {restock.map(s => (
-              <li key={s.id} className="flex items-center justify-between text-sm">
-                <span className="truncate">{s.brand ? `${s.brand} · ` : ''}{s.name}</span>
-                <span className={`text-xs px-2.5 py-1 rounded-full font-medium shrink-0 ${STOCK_META[s.stock].cls}`}>
-                  {STOCK_META[s.stock].label}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
+      <div className="grid grid-cols-2 gap-3">
+        {data.photos.map(p => {
+          const pet = petById(data.activePets, p.petId);
+          return (
+            <figure key={p.id} className="bg-[#FFFDF6] rounded-3xl p-2">
+              <img
+                src={p.photo}
+                className="w-full aspect-square rounded-2xl object-cover"
+              />
+              <figcaption className="p-2 text-xs">
+                <b>{pet?.name ?? "已归档宠物"}</b>
+                <span className="float-right text-[#264653]/40">{p.date}</span>
+                <p className="mt-1 truncate">{p.caption || "今天也很可爱"}</p>
+                <button
+                  onClick={() => data.removeDailyPhoto(p.id)}
+                  className="mt-2 text-[#C0452B]/60"
+                >
+                  删除
+                </button>
+              </figcaption>
+            </figure>
+          );
+        })}
+      </div>
+      {!data.photos.length && (
+        <p className="text-center py-20 text-[#264653]/40">还没有照片</p>
       )}
-
-      {/* 临期 / 过期提醒 */}
-      {expiring.length > 0 && (
-        <section className="bg-[#E9C46A]/15 border border-[#E9C46A]/50 rounded-3xl p-4">
-          <h3 className="font-semibold text-[#9A7B1E] flex items-center gap-1.5 mb-2">
-            <AlarmClock size={16} /> 保质期提醒
-          </h3>
-          <ul className="space-y-1.5">
-            {expiring.map(s => {
-              const e = expiryInfo(s)!
-              return (
-                <li key={s.id} className="flex items-center justify-between text-sm gap-2">
-                  <span className="truncate">{s.brand ? `${s.brand} · ` : ''}{s.name}</span>
-                  <span className={`text-xs px-2.5 py-1 rounded-full font-medium shrink-0 ${
-                    e.state === 'expired' ? 'bg-[#E76F51]/15 text-[#C0452B]' : 'bg-[#E9C46A]/30 text-[#9A7B1E]'
-                  }`}>
-                    {e.state === 'expired' ? `已过期 ${e.days} 天` : `${e.days} 天后到期`}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        </section>
-      )}
-
-      {supplies.length === 0 && (
-        <div className="pt-12 text-center text-[#264653]/50">
-          <Package size={44} className="mx-auto mb-4 opacity-40" />
-          <p className="font-medium">还没有物品</p>
-          <p className="text-sm mt-1">把狗粮、零食、玩具加进来，随时看看余量</p>
-        </div>
-      )}
-
-      {groups.map(([cat, list]) => (
-        <section key={cat}>
-          <h3 className="text-sm font-semibold text-[#264653]/50 mb-2">{cat}</h3>
-          <div className="space-y-3">
-            {list.map(s => (
-              <SupplyCard key={s.id} item={s} onUpdate={p => onUpdate(s.id, p)} onDelete={() => onDelete(s.id)} />
-            ))}
-          </div>
-        </section>
-      ))}
-
-      {sheetOpen && <AddSupplySheet onClose={() => setSheetOpen(false)} onSubmit={s => { onAdd(s); setSheetOpen(false) }} />}
+      {open && <PhotoSheet data={data} onClose={() => setOpen(false)} />}
     </div>
-  )
+  );
+}
+function PhotoSheet({ data, onClose }: { data: Data; onClose: () => void }) {
+  const [petId, setPetId] = useState(data.selectedPetId ?? "");
+  const [photo, setPhoto] = useState<string>();
+  const [caption, setCaption] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [reading, setReading] = useState(false);
+  const gallery = useRef<HTMLInputElement>(null),
+    camera = useRef<HTMLInputElement>(null);
+  const load = (f?: File) => {
+    if (!f) return;
+    setReading(true);
+    void imageFromFile(f)
+      .then(setPhoto)
+      .finally(() => setReading(false));
+  };
+  const save = async () => {
+    if (!petId || !photo) return;
+    setBusy(true);
+    await data.setDailyPhoto(petId, today(), photo, caption.trim());
+    onClose();
+  };
+  return (
+    <Sheet title="添加今日照片" onClose={onClose}>
+      <div className="space-y-3 mt-4">
+        <PetSelect pets={data.activePets} value={petId} onChange={setPetId} />
+        {reading ? (
+          <div className="aspect-square bg-[#F5F0E1] rounded-3xl grid place-items-center">
+            <RefreshCw className="animate-spin" />
+            <span>正在处理照片…</span>
+          </div>
+        ) : photo ? (
+          <img
+            src={photo}
+            className="w-full aspect-square object-cover rounded-3xl"
+          />
+        ) : (
+          <div className="aspect-square bg-[#F5F0E1] rounded-3xl grid place-items-center text-[#264653]/40">
+            <ImagePlus size={42} />
+          </div>
+        )}
+        <div className="grid grid-cols-2 gap-2">
+          <button
+            onClick={() => gallery.current?.click()}
+            className="secondary"
+          >
+            从相册选择
+          </button>
+          <button onClick={() => camera.current?.click()} className="secondary">
+            拍照
+          </button>
+        </div>
+        <input
+          ref={gallery}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={e => load(e.target.files?.[0])}
+        />
+        <input
+          ref={camera}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={e => load(e.target.files?.[0])}
+        />
+        <input
+          value={caption}
+          onChange={e => setCaption(e.target.value)}
+          placeholder="写一句话……"
+          className="field"
+        />
+        <button
+          onClick={() => void save()}
+          disabled={!petId || !photo || busy || reading}
+          className="primary"
+        >
+          {busy ? "正在保存…" : "保存今日照片"}
+        </button>
+      </div>
+    </Sheet>
+  );
 }
 
-function SupplyCard({ item: s, onUpdate, onDelete }: {
-  item: SupplyItem
-  onUpdate: (p: Partial<SupplyItem>) => void
-  onDelete: () => void
+function Supplies({ data }: { data: Data }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="px-5">
+      <div className="flex justify-between mb-4">
+        <div>
+          <h2 className="text-lg font-bold">物品</h2>
+          <p className="text-xs text-[#264653]/50">共用与专属用品统一管理</p>
+        </div>
+        <button
+          onClick={() => setOpen(true)}
+          className="bg-[#F4A261] text-white rounded-full px-4 text-sm"
+        >
+          添加
+        </button>
+      </div>
+      <div className="space-y-3">
+        {data.supplies.map(item => (
+          <SupplyCard
+            key={item.id}
+            item={item}
+            pets={data.activePets}
+            onStock={stock => data.updateSupply(item.id, { ...item, stock })}
+            onDelete={() => data.removeSupply(item.id)}
+          />
+        ))}
+      </div>
+      {open && <SupplySheet data={data} onClose={() => setOpen(false)} />}
+    </div>
+  );
+}
+function SupplyCard({
+  item: supply,
+  pets,
+  onStock,
+  onDelete,
+}: {
+  item: SupplyItem;
+  pets: PetProfile[];
+  onStock: (stock: StockLevel) => unknown;
+  onDelete: () => unknown;
 }) {
-  const e = expiryInfo(s)
+  const owner = supply.petId ? petById(pets, supply.petId) : undefined;
+  const expiry = expiryInfo(supply);
   return (
     <article className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
       <div className="flex items-start gap-3">
         <div className="w-14 h-14 rounded-2xl bg-[#F5F0E1] overflow-hidden flex items-center justify-center shrink-0">
-          {s.photo
-            ? <img src={s.photo} alt="" className="w-full h-full object-cover" />
-            : <Package size={22} className="text-[#264653]/30" />}
+          {supply.photo ? (
+            <img
+              src={supply.photo}
+              alt=""
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <Package size={22} className="text-[#264653]/30" />
+          )}
         </div>
         <div className="flex-1 min-w-0">
           <div className="flex items-center justify-between gap-2">
-            <h4 className="font-semibold truncate">
-              {s.brand && <span className="text-[#264653]/55 font-normal text-sm mr-1">{s.brand}</span>}
-              {s.name}
-            </h4>
-            <button onClick={onDelete} className="text-[#264653]/25 hover:text-[#E76F51] transition shrink-0" aria-label="删除">
-              <Trash2 size={16} />
+            <h3 className="font-semibold truncate">
+              {supply.brand && (
+                <span className="text-[#264653]/55 font-normal text-sm mr-1">
+                  {supply.brand}
+                </span>
+              )}
+              {supply.name}
+            </h3>
+            <button
+              onClick={onDelete}
+              className="w-8 h-8 rounded-full bg-[#E76F51]/10 text-[#C0452B]/65 flex items-center justify-center shrink-0 active:scale-95 transition"
+              aria-label={`删除${supply.name}`}
+            >
+              <Trash2 size={15} />
             </button>
           </div>
-          {s.variant && <p className="text-xs text-[#264653]/55 mt-0.5">{s.variant}</p>}
-          {e && (
-            <p className={`text-xs mt-1 font-medium ${
-              e.state === 'expired' ? 'text-[#C0452B]' : e.state === 'soon' ? 'text-[#9A7B1E]' : 'text-[#264653]/45'
-            }`}>
-              {e.state === 'expired'
-                ? `已于 ${e.date} 过期（${e.days} 天前）`
-                : `${e.date} 到期${e.state === 'soon' ? `，还剩 ${e.days} 天` : ''}`}
+          {supply.variant && (
+            <p className="text-xs text-[#264653]/55 mt-0.5">{supply.variant}</p>
+          )}
+          <p className="text-xs text-[#264653]/45 mt-1">
+            {owner ? `${owner.name}专属` : "全家共用"} · {supply.category}
+          </p>
+          {expiry && (
+            <p
+              className={`text-xs mt-1 font-medium ${expiry.state === "expired" ? "text-[#C0452B]" : expiry.state === "soon" ? "text-[#9A7B1E]" : "text-[#264653]/45"}`}
+            >
+              {expiry.state === "expired"
+                ? `已于 ${expiry.date} 过期（${expiry.days} 天前）`
+                : `${expiry.date} 到期${expiry.state === "soon" ? `，还剩 ${expiry.days} 天` : ""}`}
             </p>
           )}
-          {s.note && <p className="text-xs text-[#264653]/55 mt-1">{s.note}</p>}
+          {supply.note && (
+            <p className="text-xs text-[#264653]/55 mt-1">{supply.note}</p>
+          )}
         </div>
       </div>
-      <div className="flex gap-1.5 mt-2.5">
-        {(Object.keys(STOCK_META) as StockLevel[]).map(lv => (
+      <div className="grid grid-cols-3 gap-2 mt-3">
+        {(Object.keys(STOCK_META) as StockLevel[]).map(level => (
           <button
-            key={lv}
-            onClick={() => onUpdate({ stock: lv })}
-            className={`text-xs px-3 py-1.5 rounded-full transition ${
-              s.stock === lv ? `${STOCK_META[lv].cls} font-semibold` : 'bg-[#F5F0E1] text-[#264653]/45'
-            }`}
+            key={level}
+            onClick={() => onStock(level)}
+            className={`text-xs px-3 py-2 rounded-full transition active:scale-95 ${supply.stock === level ? `${STOCK_META[level].cls} font-semibold ring-1 ring-current/15` : "bg-[#F5F0E1] text-[#264653]/45"}`}
           >
-            {STOCK_META[lv].label}
+            {STOCK_META[level].label}
           </button>
         ))}
       </div>
     </article>
-  )
+  );
 }
-
-function AddSupplySheet({ onClose, onSubmit }: {
-  onClose: () => void
-  onSubmit: (s: Omit<SupplyItem, 'id' | 'updatedAt'>) => void
-}) {
-  const [name, setName] = useState('')
-  const [brand, setBrand] = useState('')
-  const [variant, setVariant] = useState('')
-  const [category, setCategory] = useState(SUPPLY_CATEGORIES[0])
-  const [stock, setStock] = useState<StockLevel>('plenty')
-  const [photo, setPhoto] = useState<string | undefined>()
-  const [produceDate, setProduceDate] = useState('')
-  const [shelfMonths, setShelfMonths] = useState('')
-  const [note, setNote] = useState('')
-  const fileRef = useRef<HTMLInputElement>(null)
-  const field = 'mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40'
-
+function SupplySheet({ data, onClose }: { data: Data; onClose: () => void }) {
+  const [petId, setPetId] = useState(data.selectedPetId ?? "");
+  const [name, setName] = useState("");
+  const [brand, setBrand] = useState("");
+  const [variant, setVariant] = useState("");
+  const [category, setCategory] = useState(SUPPLY_CATEGORIES[0]);
+  const [stock, setStock] = useState<StockLevel>("plenty");
+  const [photo, setPhoto] = useState<string>();
+  const [produceDate, setProduceDate] = useState("");
+  const [shelfMonths, setShelfMonths] = useState("");
+  const [note, setNote] = useState("");
+  const [readingPhoto, setReadingPhoto] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
   const expiryPreview = (() => {
-    if (!produceDate || !shelfMonths) return ''
-    const exp = new Date(produceDate)
-    exp.setMonth(exp.getMonth() + Number(shelfMonths))
-    return `预计 ${exp.getFullYear()} 年 ${exp.getMonth() + 1} 月 ${exp.getDate()} 日到期`
-  })()
-
+    if (!produceDate || !shelfMonths) return "";
+    const expiry = new Date(produceDate);
+    expiry.setMonth(expiry.getMonth() + Number(shelfMonths));
+    return `预计 ${expiry.getFullYear()} 年 ${expiry.getMonth() + 1} 月 ${expiry.getDate()} 日到期`;
+  })();
+  const save = async () => {
+    if (!name.trim() || saving) return;
+    setSaving(true);
+    await data.addSupply({
+      petId: petId || undefined,
+      name: name.trim(),
+      brand: brand.trim(),
+      variant: variant.trim(),
+      category,
+      stock,
+      photo,
+      produceDate: produceDate || undefined,
+      shelfMonths: shelfMonths ? Number(shelfMonths) : undefined,
+      note: note.trim(),
+    });
+    onClose();
+  };
   return (
-    <div className="fixed inset-0 z-30 flex items-end justify-center" onClick={onClose}>
-      <div className="absolute inset-0 bg-[#264653]/40" />
-      <div
-        className="relative w-full max-w-md bg-[#FFFDF6] rounded-t-[2rem] p-5 pb-8 max-h-[88dvh] overflow-y-auto"
-        onClick={e => e.stopPropagation()}
-      >
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold">添加物品</h2>
-          <button onClick={onClose} className="text-[#264653]/40" aria-label="关闭"><X size={22} /></button>
-        </div>
-        <div className="space-y-3">
-          {/* 照片 */}
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => fileRef.current?.click()}
-              className="w-16 h-16 rounded-2xl border-2 border-dashed border-[#F4A261]/40 bg-[#F5F0E1]/60 flex items-center justify-center overflow-hidden shrink-0"
-            >
-              {photo ? <img src={photo} alt="" className="w-full h-full object-cover" /> : <Camera size={22} className="text-[#F4A261]" />}
-            </button>
-            <p className="text-xs text-[#264653]/50">拍一张物品照片，<br />一眼认出是哪一款</p>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={e => readImage(e.target.files?.[0], setPhoto)} />
-          </div>
-
-          <label className="block">
-            <span className="text-xs text-[#264653]/50">名称 *</span>
-            <input value={name} onChange={e => setName(e.target.value)} placeholder="比如：全价冻干狗粮" className={field} />
-          </label>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="text-xs text-[#264653]/50">品牌</span>
-              <input value={brand} onChange={e => setBrand(e.target.value)} placeholder="比如：渴望" className={field} />
-            </label>
-            <label className="block">
-              <span className="text-xs text-[#264653]/50">款式 / 规格</span>
-              <input value={variant} onChange={e => setVariant(e.target.value)} placeholder="比如：鸡肉味 2kg" className={field} />
-            </label>
-          </div>
-          <div>
-            <span className="text-xs text-[#264653]/50">分类</span>
-            <div className="grid grid-cols-3 gap-2 mt-1">
-              {SUPPLY_CATEGORIES.map(c => (
-                <button
-                  key={c}
-                  onClick={() => setCategory(c)}
-                  className={`rounded-2xl py-2 text-sm transition ${category === c ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/70'}`}
-                >
-                  {c}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="text-xs text-[#264653]/50">生产日期</span>
-              <input type="date" value={produceDate} onChange={e => setProduceDate(e.target.value)} className={field} />
-            </label>
-            <label className="block">
-              <span className="text-xs text-[#264653]/50">保质期（月）</span>
-              <input type="number" inputMode="numeric" min="1" value={shelfMonths} onChange={e => setShelfMonths(e.target.value)} placeholder="比如：18" className={field} />
-            </label>
-          </div>
-          {expiryPreview && <p className="text-xs text-[#9A7B1E] flex items-center gap-1"><AlarmClock size={12} /> {expiryPreview}</p>}
-          <div>
-            <span className="text-xs text-[#264653]/50">当前余量</span>
-            <div className="grid grid-cols-3 gap-2 mt-1">
-              {(Object.keys(STOCK_META) as StockLevel[]).map(lv => (
-                <button
-                  key={lv}
-                  onClick={() => setStock(lv)}
-                  className={`rounded-2xl py-2 text-sm transition ${stock === lv ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/70'}`}
-                >
-                  {STOCK_META[lv].label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <label className="block">
-            <span className="text-xs text-[#264653]/50">备注</span>
-            <input value={note} onChange={e => setNote(e.target.value)} placeholder="常买的店、大概能吃多久…" className={field} />
-          </label>
+    <Sheet title="添加物品" onClose={onClose}>
+      <div className="space-y-3 mt-4">
+        <div className="flex items-center gap-3">
           <button
-            onClick={() => name.trim() && onSubmit({
-              name: name.trim(), brand: brand.trim(), variant: variant.trim(),
-              category, stock, photo,
-              produceDate: produceDate || undefined,
-              shelfMonths: shelfMonths ? Number(shelfMonths) : undefined,
-              note: note.trim(),
-            })}
-            className="w-full bg-[#F4A261] text-white font-bold rounded-2xl py-3.5 active:scale-[0.98] transition disabled:opacity-40"
-            disabled={!name.trim()}
+            type="button"
+            onClick={() => fileRef.current?.click()}
+            className="w-16 h-16 rounded-2xl border-2 border-dashed border-[#F4A261]/40 bg-[#F5F0E1]/60 flex items-center justify-center overflow-hidden shrink-0"
           >
-            保存
+            {readingPhoto ? (
+              <RefreshCw size={20} className="animate-spin text-[#F4A261]" />
+            ) : photo ? (
+              <img src={photo} alt="" className="w-full h-full object-cover" />
+            ) : (
+              <Camera size={22} className="text-[#F4A261]" />
+            )}
           </button>
+          <p className="text-xs text-[#264653]/50">
+            拍一张物品照片，
+            <br />
+            一眼认出是哪一款
+          </p>
+          <input
+            ref={fileRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={event => {
+              setReadingPhoto(true);
+              void imageFromFile(event.target.files?.[0])
+                .then(setPhoto)
+                .finally(() => setReadingPhoto(false));
+            }}
+          />
         </div>
-      </div>
-    </div>
-  )
-}
-
-/* ---------------- 统计 ---------------- */
-
-function DataBackup({ data }: { data: ReturnType<typeof useDogData> }) {
-  const [busy, setBusy] = useState<'export' | 'import' | null>(null)
-  const [notice, setNotice] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null)
-
-  const exportData = async () => {
-    setBusy('export')
-    setNotice(null)
-    try {
-      const backup = await data.createBackup()
-      const saved = await saveBackupText(JSON.stringify(backup))
-      if (saved) setNotice({ kind: 'ok', text: '备份已导出，请妥善保存' })
-    } catch (error) {
-      setNotice({ kind: 'error', text: error instanceof Error ? error.message : '导出失败' })
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  const importData = async () => {
-    setBusy('import')
-    setNotice(null)
-    try {
-      const text = await pickBackupText()
-      if (text === null) return
-      const backup = parsePetBackupText(text)
-      const confirmed = window.confirm(
-        `将用此备份替换当前本地数据：\n${backup.records.length} 条记录、${backup.photos.length} 张每日照片、${backup.supplies.length} 件物品。\n\n继续导入吗？`,
-      )
-      if (!confirmed) return
-      await data.restoreBackup(backup)
-      setNotice({ kind: 'ok', text: '导入完成，当前本地数据已更新' })
-    } catch (error) {
-      setNotice({ kind: 'error', text: error instanceof Error ? error.message : '导入失败' })
-    } finally {
-      setBusy(null)
-    }
-  }
-
-  return (
-    <section className="px-5 mt-8 mb-2">
-      <div className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5 space-y-3">
-        <div className="flex items-center gap-2">
-          <DatabaseBackup size={18} className="text-[#F4A261]" />
-          <div>
-            <h2 className="font-semibold text-sm">本地数据备份</h2>
-            <p className="text-[11px] text-[#264653]/45">记录和照片一起保存为备份文件</p>
+        <PetSelect
+          pets={data.activePets}
+          value={petId}
+          onChange={setPetId}
+          allowShared
+        />
+        <label className="block">
+          <span className="text-xs text-[#264653]/50">名称 *</span>
+          <input
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="比如：全价冻干狗粮"
+            className="field mt-1"
+          />
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          <label className="block">
+            <span className="text-xs text-[#264653]/50">品牌</span>
+            <input
+              value={brand}
+              onChange={e => setBrand(e.target.value)}
+              placeholder="比如：渴望"
+              className="field mt-1"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-[#264653]/50">款式 / 规格</span>
+            <input
+              value={variant}
+              onChange={e => setVariant(e.target.value)}
+              placeholder="比如：鸡肉味 2kg"
+              className="field mt-1"
+            />
+          </label>
+        </div>
+        <div>
+          <span className="text-xs text-[#264653]/50">分类</span>
+          <div className="grid grid-cols-3 gap-2 mt-1">
+            {SUPPLY_CATEGORIES.map(item => (
+              <button
+                type="button"
+                key={item}
+                onClick={() => setCategory(item)}
+                className={`rounded-2xl py-2 text-sm transition ${category === item ? "bg-[#F4A261] text-white font-semibold" : "bg-[#F5F0E1] text-[#264653]/70"}`}
+              >
+                {item}
+              </button>
+            ))}
           </div>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <button
-            type="button"
-            onClick={() => void exportData()}
-            disabled={busy !== null}
-            className="rounded-2xl py-2.5 text-sm font-semibold bg-[#F4A261] text-white disabled:opacity-40 flex items-center justify-center gap-1.5"
-          >
-            {busy === 'export' ? <RefreshCw size={14} className="animate-spin" /> : <Download size={14} />}
-            导出备份
-          </button>
-          <button
-            type="button"
-            onClick={() => void importData()}
-            disabled={busy !== null}
-            className="rounded-2xl py-2.5 text-sm font-semibold bg-[#F5F0E1] text-[#264653] disabled:opacity-40 flex items-center justify-center gap-1.5"
-          >
-            {busy === 'import' ? <RefreshCw size={14} className="animate-spin" /> : <Upload size={14} />}
-            导入备份
-          </button>
+          <label className="block">
+            <span className="text-xs text-[#264653]/50">生产日期</span>
+            <input
+              type="date"
+              value={produceDate}
+              onChange={e => setProduceDate(e.target.value)}
+              className="field mt-1"
+            />
+          </label>
+          <label className="block">
+            <span className="text-xs text-[#264653]/50">保质期（月）</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              min="1"
+              value={shelfMonths}
+              onChange={e => setShelfMonths(e.target.value)}
+              placeholder="比如：18"
+              className="field mt-1"
+            />
+          </label>
         </div>
-        <p className="text-[11px] text-[#264653]/45">导入前会再次确认；导入成功后将替换当前档案、记录、照片和物品数据。</p>
-        {notice && (
-          <p className={`flex items-center gap-1.5 text-[11px] ${notice.kind === 'error' ? 'text-[#C0452B]' : 'text-[#2A7F83]'}`}>
-            {notice.kind === 'error' ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
-            {notice.text}
+        {expiryPreview && (
+          <p className="text-xs text-[#9A7B1E] flex items-center gap-1">
+            <AlarmClock size={12} />
+            {expiryPreview}
           </p>
         )}
+        <div>
+          <span className="text-xs text-[#264653]/50">当前余量</span>
+          <div className="grid grid-cols-3 gap-2 mt-1">
+            {(Object.keys(STOCK_META) as StockLevel[]).map(level => (
+              <button
+                type="button"
+                key={level}
+                onClick={() => setStock(level)}
+                className={`rounded-2xl py-2 text-sm transition ${stock === level ? "bg-[#F4A261] text-white font-semibold" : "bg-[#F5F0E1] text-[#264653]/70"}`}
+              >
+                {STOCK_META[level].label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <label className="block">
+          <span className="text-xs text-[#264653]/50">备注</span>
+          <input
+            value={note}
+            onChange={e => setNote(e.target.value)}
+            placeholder="常买的店、大概能吃多久…"
+            className="field mt-1"
+          />
+        </label>
+        <button
+          onClick={() => void save()}
+          disabled={!name.trim() || saving || readingPhoto}
+          className="primary"
+        >
+          {saving ? "正在保存…" : "保存物品"}
+        </button>
       </div>
-      <p className="text-center text-[11px] text-[#264653]/35 mt-3">全部数据仅保存在本机，不连接远程服务器</p>
-    </section>
-  )
+    </Sheet>
+  );
 }
 
-function HomeCardsEditor({ selected, onClose, onSave }: {
-  selected: HomeCardType[]
-  onClose: () => void
-  onSave: (types: HomeCardType[]) => Promise<unknown>
+function Me({
+  data,
+  onRecord,
+}: {
+  data: Data;
+  onRecord: (t: RecordType) => void;
 }) {
-  const [draft, setDraft] = useState<HomeCardType[]>(selected)
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState('')
-  const sensors = useSensors(
-    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
-    useSensor(TouchSensor, { activationConstraint: { delay: 120, tolerance: 6 } }),
-    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
-  )
-
-  const toggle = (type: HomeCardType) => {
-    setError('')
-    setDraft(current => current.includes(type)
-      ? current.filter(item => item !== type)
-      : [...current, type])
-  }
-
-  const submit = async () => {
-    if (draft.length === 0) {
-      setError('请至少保留一个主页卡片')
-      return
-    }
-    setSaving(true)
-    setError('')
-    try {
-      await onSave(draft)
-    } catch {
-      setError('保存失败，请重试')
-      setSaving(false)
-    }
-  }
-
-  const handleDragEnd = ({ active, over }: DragEndEvent) => {
-    if (!over || active.id === over.id) return
-    setDraft(current => {
-      const from = current.indexOf(active.id as HomeCardType)
-      const to = current.indexOf(over.id as HomeCardType)
-      return from >= 0 && to >= 0 ? arrayMove(current, from, to) : current
-    })
-  }
-
-  const available = HOME_CARD_OPTIONS.filter(option => !draft.includes(option.type))
-
   return (
-    <div className="fixed inset-0 z-40 flex items-end justify-center" onClick={saving ? undefined : onClose}>
-      <div className="absolute inset-0 bg-[#264653]/40" />
-      <section
-        className="relative w-full max-w-md bg-[#FFFDF6] rounded-t-[2rem] p-5 pb-8 max-h-[85dvh] overflow-y-auto"
-        onClick={event => event.stopPropagation()}
-        aria-labelledby="home-cards-title"
-      >
-        <div className="flex items-center justify-between gap-3 mb-1">
-          <h2 id="home-cards-title" className="text-lg font-bold">编辑主页卡片</h2>
-          <button type="button" onClick={onClose} disabled={saving} aria-label="关闭" className="text-[#264653]/40 disabled:opacity-40">
-            <X size={22} />
-          </button>
-        </div>
-        <p className="text-xs text-[#264653]/50 mb-4">拖动已选卡片调整主页顺序，也可以添加或移除项目</p>
-
-        <h3 className="text-xs font-semibold text-[#264653]/55 mb-2">主页显示 · {draft.length} 项</h3>
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={draft} strategy={verticalListSortingStrategy}>
-            <div className="space-y-2">
-              {draft.map(type => (
-                <SortableHomeCard
-                  key={type}
-                  type={type}
-                  disabled={saving}
-                  onRemove={() => toggle(type)}
-                />
-              ))}
+    <div className="space-y-6">
+      <PetManager data={data} />
+      <Stats
+        records={data.records}
+        pets={data.activePets}
+        selectedPet={data.selectedPet}
+        onRecord={onRecord}
+      />
+      <DataBackup data={data} />
+    </div>
+  );
+}
+function PetManager({ data }: { data: Data }) {
+  const [editing, setEditing] = useState<PetProfile | "new">();
+  const archived = data.pets.filter(p => p.archivedAt);
+  return (
+    <section className="px-5">
+      <div className="flex justify-between mb-3">
+        <h2 className="text-lg font-bold">宠物管理</h2>
+        <button
+          onClick={() => setEditing("new")}
+          className="text-sm text-[#C76E2B] flex gap-1"
+        >
+          <Plus size={16} />
+          添加宠物
+        </button>
+      </div>
+      <div className="space-y-3">
+        {data.activePets.map(p => (
+          <article
+            key={p.id}
+            className="bg-[#FFFDF6] rounded-3xl p-4 flex gap-3 items-center"
+          >
+            <Avatar pet={p} size="lg" />
+            <div className="flex-1">
+              <h3 className="font-bold">{p.name}</h3>
+              <p className="text-xs text-[#264653]/50">
+                {speciesText(p.species)} · {p.breed || "品种待填写"}
+              </p>
             </div>
-          </SortableContext>
-        </DndContext>
-
-        {available.length > 0 && (
-          <div className="mt-5">
-            <h3 className="text-xs font-semibold text-[#264653]/55 mb-2">添加其他卡片</h3>
-            <div className="grid grid-cols-2 gap-2">
-              {available.map(({ type, label }) => {
-                const Icon = TYPE_ICON[type]
-                return (
-                  <button
-                    key={type}
-                    type="button"
-                    onClick={() => toggle(type)}
-                    disabled={saving}
-                    className="flex items-center gap-2 rounded-2xl px-3 py-2.5 text-sm text-left bg-[#F5F0E1] text-[#264653]/65 disabled:opacity-50"
-                  >
-                    <span className={`w-7 h-7 rounded-lg flex items-center justify-center shrink-0 ${TYPE_COLOR[type]}`}>
-                      <Icon size={15} />
-                    </span>
-                    <span className="flex-1 font-medium">{label}</span>
-                    <Plus size={14} />
+            <button onClick={() => setEditing(p)}>
+              <Pencil size={17} />
+            </button>
+            <button
+              onClick={() => {
+                if (confirm(`归档 ${p.name}？历史数据会保留。`))
+                  void data.archivePet(p.id);
+              }}
+            >
+              <Archive size={17} />
+            </button>
+          </article>
+        ))}
+        {archived.length > 0 && (
+          <div>
+            <p className="text-xs text-[#264653]/45 my-2">已归档</p>
+            {archived.map(p => (
+              <div
+                key={p.id}
+                className="bg-white/60 rounded-2xl p-3 flex justify-between mb-2"
+              >
+                <span>{p.name}</span>
+                <span className="flex gap-3">
+                  <button onClick={() => data.restorePet(p.id)}>
+                    <ArchiveRestore size={17} />
                   </button>
-                )
-              })}
-            </div>
+                  <button
+                    className="text-[#C0452B]"
+                    onClick={() => {
+                      if (
+                        confirm(
+                          `永久删除 ${p.name} 及其记录、照片和专属物品？此操作无法撤销。`
+                        ) &&
+                        prompt("请输入宠物名称确认") === p.name
+                      )
+                        void data.deletePet(p.id);
+                    }}
+                  >
+                    <Trash2 size={17} />
+                  </button>
+                </span>
+              </div>
+            ))}
           </div>
         )}
-        {error && <p className="text-xs text-[#C0452B] mt-2" role="alert">{error}</p>}
+      </div>
+      {editing && (
+        <PetForm
+          initial={editing === "new" ? undefined : editing}
+          onClose={() => setEditing(undefined)}
+          onSave={async p => {
+            if ("id" in p) await data.updatePet(p);
+            else await data.createPet(p);
+            setEditing(undefined);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+function PetForm({
+  initial,
+  onClose,
+  onSave,
+}: {
+  initial?: PetProfile;
+  onClose: () => void;
+  onSave: (
+    p: PetProfile | Omit<PetProfile, "id" | "archivedAt">
+  ) => Promise<unknown>;
+}) {
+  const [draft, setDraft] = useState<Omit<PetProfile, "id" | "archivedAt">>({
+    species: initial?.species ?? "dog",
+    name: initial?.name ?? "",
+    breed: initial?.breed ?? "",
+    birthday: initial?.birthday ?? "",
+    homeDate: initial?.homeDate ?? "",
+    gender: initial?.gender ?? "boy",
+    neutered: initial?.neutered ?? "",
+    avatar: initial?.avatar,
+  });
+  const save = () =>
+    onSave(
+      initial
+        ? { ...draft, id: initial.id, archivedAt: initial.archivedAt }
+        : draft
+    ).then(onClose);
+  return (
+    <Sheet title={initial ? "编辑宠物名片" : "添加宠物"} onClose={onClose}>
+      <div className="space-y-3 mt-4">
+        <div className="grid grid-cols-2 gap-2">
+          {(["dog", "cat"] as const).map(s => (
+            <button
+              key={s}
+              onClick={() => setDraft(d => ({ ...d, species: s }))}
+              className={`secondary ${draft.species === s ? "!bg-[#F4A261] !text-white" : ""}`}
+            >
+              {s === "dog" ? "🐶 狗狗" : "🐱 猫咪"}
+            </button>
+          ))}
+        </div>
+        <input
+          value={draft.name}
+          onChange={e => setDraft(d => ({ ...d, name: e.target.value }))}
+          placeholder="名字（必填）"
+          className="field"
+        />
+        <input
+          value={draft.breed}
+          onChange={e => setDraft(d => ({ ...d, breed: e.target.value }))}
+          placeholder="品种"
+          className="field"
+        />
+        <div className="grid grid-cols-2 gap-2">
+          <label className="text-xs">
+            生日
+            <input
+              type="date"
+              value={draft.birthday}
+              onChange={e =>
+                setDraft(d => ({ ...d, birthday: e.target.value }))
+              }
+              className="field mt-1"
+            />
+          </label>
+          <label className="text-xs">
+            到家日
+            <input
+              type="date"
+              value={draft.homeDate}
+              onChange={e =>
+                setDraft(d => ({ ...d, homeDate: e.target.value }))
+              }
+              className="field mt-1"
+            />
+          </label>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            value={draft.gender}
+            onChange={e =>
+              setDraft(d => ({
+                ...d,
+                gender: e.target.value as "boy" | "girl",
+              }))
+            }
+            className="field"
+          >
+            <option value="boy">弟弟</option>
+            <option value="girl">妹妹</option>
+          </select>
+          <select
+            value={draft.neutered}
+            onChange={e =>
+              setDraft(d => ({
+                ...d,
+                neutered: e.target.value as "" | "yes" | "no",
+              }))
+            }
+            className="field"
+          >
+            <option value="">绝育情况未知</option>
+            <option value="yes">已绝育</option>
+            <option value="no">未绝育</option>
+          </select>
+        </div>
+        <ImagePicker
+          value={draft.avatar}
+          onChange={avatar => setDraft(d => ({ ...d, avatar }))}
+        />
         <button
-          type="button"
-          onClick={submit}
-          disabled={saving}
-          className="w-full mt-4 bg-[#F4A261] text-white font-bold rounded-2xl py-3.5 disabled:opacity-60 flex items-center justify-center gap-2"
+          disabled={!draft.name.trim()}
+          onClick={() => void save()}
+          className="primary"
         >
-          {saving && <RefreshCw size={17} className="animate-spin" />}
-          {saving ? '正在保存…' : '保存主页设置'}
+          保存名片
         </button>
-      </section>
-    </div>
-  )
+      </div>
+    </Sheet>
+  );
 }
 
-function SortableHomeCard({ type, disabled, onRemove }: {
-  type: HomeCardType
-  disabled: boolean
-  onRemove: () => void
+function Stats({
+  records,
+  pets,
+  selectedPet,
+  onRecord,
+}: {
+  records: PetRecord[];
+  pets: PetProfile[];
+  selectedPet?: PetProfile;
+  onRecord: (t: RecordType) => void;
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: type, disabled })
-  const { label } = homeCardOption(type)
-  const Icon = TYPE_ICON[type]
-
+  const [weekAgo] = useState(() => Date.now() - 7 * 86400000);
+  const week = records.filter(r => +new Date(r.time) >= weekAgo);
+  const count = (t: RecordType, a = records) =>
+    a.filter(r => r.type === t).length;
+  const cards: [string, string, RecordType][] = [
+    ["本周活动", `${count("walk", week)} 次`, "walk"],
+    ["本周喂食", `${count("feed", week)} 次`, "feed"],
+    ["驱虫累计", `${count("deworm")} 次`, "deworm"],
+    ["疫苗记录", `${count("vaccine")} 条`, "vaccine"],
+    ["体检累计", `${count("checkup")} 次`, "checkup"],
+    ["全部记录", `${records.length} 条`, "note"],
+  ];
+  const weightGroups = (selectedPet ? [selectedPet] : pets).map(p => ({
+    pet: p,
+    rows: records
+      .filter(r => r.petId === p.id && r.type === "weight" && r.value != null)
+      .slice(0, 20)
+      .reverse(),
+  }));
+  return (
+    <section className="px-5">
+      <h2 className="font-bold mb-3">统计</h2>
+      <div className="grid grid-cols-2 gap-3">
+        {cards.map(([label, value, type]) => {
+          const I = ICONS[type];
+          return (
+            <button
+              key={label}
+              onClick={() => onRecord(type)}
+              className="bg-[#FFFDF6] rounded-3xl p-4 text-left"
+            >
+              <I size={18} />
+              <b className="block text-xl mt-2">{value}</b>
+              <span className="text-xs text-[#264653]/50">{label}</span>
+            </button>
+          );
+        })}
+      </div>
+      <div className="bg-[#FFFDF6] rounded-3xl p-4 mt-3">
+        <h3 className="font-bold">体重趋势</h3>
+        {weightGroups.map(g => (
+          <div key={g.pet.id} className="mt-3">
+            <p className="text-xs font-semibold">{g.pet.name}</p>
+            {g.rows.length >= 2 ? (
+              <WeightChart data={g.rows} />
+            ) : (
+              <p className="text-xs text-[#264653]/40 py-4">
+                至少记录两次体重后显示趋势
+              </p>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+function WeightChart({ data }: { data: PetRecord[] }) {
+  const W = 320,
+    H = 110,
+    P = 22,
+    vals = data.map(d => d.value!),
+    min = Math.min(...vals),
+    max = Math.max(...vals),
+    span = max - min || 1,
+    x = (i: number) => P + (i / Math.max(data.length - 1, 1)) * (W - P * 2),
+    y = (v: number) => H - P - ((v - min) / span) * (H - P * 2),
+    pts = data.map((d, i) => `${x(i)},${y(d.value!)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
+      <polyline points={pts} fill="none" stroke="#F4A261" strokeWidth="2.5" />
+      {data.map((d, i) => (
+        <circle key={d.id} cx={x(i)} cy={y(d.value!)} r="4" fill="#F4A261" />
+      ))}
+    </svg>
+  );
+}
+function CardsEditor({ data, onClose }: { data: Data; onClose: () => void }) {
+  const [draft, setDraft] = useState<HomeCardType[]>(data.homeCardTypes);
+  const species = data.selectedPet!.species;
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+    useSensor(TouchSensor, {
+      activationConstraint: { delay: 120, tolerance: 6 },
+    })
+  );
+  const handleDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return;
+    setDraft(items =>
+      arrayMove(
+        items,
+        items.indexOf(active.id as HomeCardType),
+        items.indexOf(over.id as HomeCardType)
+      )
+    );
+  };
+  return (
+    <Sheet title={`编辑${speciesText(species)}主页卡片`} onClose={onClose}>
+      <p className="text-xs text-[#264653]/50 mt-2">
+        此排序会应用到所有{speciesText(species)}。
+      </p>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext items={draft} strategy={verticalListSortingStrategy}>
+          <div className="space-y-2 mt-4">
+            {draft.map(type => (
+              <SortableCard
+                key={type}
+                type={type}
+                species={species}
+                onRemove={() => setDraft(v => v.filter(item => item !== type))}
+              />
+            ))}
+          </div>
+        </SortableContext>
+      </DndContext>
+      <select
+        value=""
+        onChange={e => {
+          if (e.target.value)
+            setDraft(v => [...v, e.target.value as HomeCardType]);
+        }}
+        className="field mt-3"
+      >
+        <option value="">添加卡片……</option>
+        {HOME_OPTIONS.filter(t => !draft.includes(t)).map(t => (
+          <option key={t} value={t}>
+            {typeMeta(t, species).label}
+          </option>
+        ))}
+      </select>
+      <button
+        disabled={!draft.length}
+        onClick={() => void data.setHomeCards(species, draft).then(onClose)}
+        className="primary mt-3"
+      >
+        保存设置
+      </button>
+    </Sheet>
+  );
+}
+function SortableCard({
+  type,
+  species,
+  onRemove,
+}: {
+  type: HomeCardType;
+  species: PetSpecies;
+  onRemove: () => void;
+}) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: type });
   return (
     <div
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, zIndex: isDragging ? 10 : undefined }}
-      className={`flex items-center gap-2 rounded-2xl px-2.5 py-2 bg-[#F4A261]/12 border border-[#F4A261]/45 ${isDragging ? 'shadow-lg opacity-95' : ''}`}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      className={`secondary flex justify-between ${isDragging ? "shadow-lg opacity-90" : ""}`}
     >
       <button
-        type="button"
-        aria-label={`拖动${label}`}
-        disabled={disabled}
-        className="p-1.5 text-[#264653]/35 cursor-grab active:cursor-grabbing touch-none disabled:opacity-40"
+        className="touch-none cursor-grab p-1"
+        aria-label={`拖动${typeMeta(type, species).label}`}
         {...attributes}
         {...listeners}
       >
-        <GripVertical size={18} />
+        <GripVertical size={17} />
       </button>
-      <span className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${TYPE_COLOR[type]}`}>
-        <Icon size={17} />
-      </span>
-      <span className="flex-1 text-sm font-medium">{label}</span>
+      <span className="flex-1 text-left">{typeMeta(type, species).label}</span>
       <button
-        type="button"
-        aria-label={`移除${label}`}
         onClick={onRemove}
-        disabled={disabled}
-        className="p-2 text-[#264653]/35 hover:text-[#C0452B] disabled:opacity-40"
+        aria-label={`移除${typeMeta(type, species).label}`}
       >
         <X size={16} />
       </button>
     </div>
-  )
+  );
 }
-
-function Stats({ records, onAddRecord }: {
-  records: DogRecord[]
-  onAddRecord: (type: RecordType) => void
-}) {
-  const [weekAgo] = useState(() => Date.now() - 7 * 86400000)
-  const week = records.filter(r => +new Date(r.time) >= weekAgo)
-  const count = (t: RecordType, list = records) => list.filter(r => r.type === t).length
-  const walkMins = week.filter(r => r.type === 'walk').reduce((s, r) => s + (r.value ?? 0), 0)
-  const weights = records.filter(r => r.type === 'weight' && r.value != null).slice(0, 20).reverse()
-
-  const items: { label: string; value: string; icon: typeof Bone; cls: string; type?: RecordType }[] = [
-    { label: '本周遛狗', value: `${count('walk', week)} 次`, icon: Footprints, cls: TYPE_COLOR.walk, type: 'walk' },
-    { label: '本周遛弯时长', value: walkMins ? `${walkMins} 分钟` : '—', icon: Footprints, cls: TYPE_COLOR.walk, type: 'walk' },
-    { label: '本周喂食', value: `${count('feed', week)} 次`, icon: Bone, cls: TYPE_COLOR.feed, type: 'feed' },
-    { label: '驱虫累计', value: `${count('deworm')} 次`, icon: Bug, cls: TYPE_COLOR.deworm, type: 'deworm' },
-    { label: '体检累计', value: `${count('checkup')} 次`, icon: HeartPulse, cls: TYPE_COLOR.checkup, type: 'checkup' },
-    { label: '疫苗记录', value: `${count('vaccine')} 条`, icon: Syringe, cls: TYPE_COLOR.vaccine, type: 'vaccine' },
-    { label: '大事件', value: `${count('milestone')} 件`, icon: Flag, cls: TYPE_COLOR.milestone, type: 'milestone' },
-    { label: '全部记录', value: `${records.length} 条`, icon: NotebookPen, cls: TYPE_COLOR.note },
-  ]
-
+function DataBackup({ data }: { data: Data }) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const exp = async () => {
+    setBusy(true);
+    try {
+      const b = await data.createBackup();
+      await saveBackupText(JSON.stringify(b));
+      setNotice("备份已导出，包含全部宠物和照片");
+    } catch {
+      setNotice("导出失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const imp = async () => {
+    setBusy(true);
+    try {
+      const text = await pickBackupText();
+      if (!text) return;
+      const b = parsePetBackupText(text);
+      if (
+        !confirm(
+          `将用备份中的 ${b.pets.length} 只宠物整体替换当前数据，继续吗？`
+        )
+      )
+        return;
+      await data.restoreBackup(b);
+      data.setSelectedPetId(undefined);
+      setNotice("备份恢复完成");
+    } catch (e) {
+      setNotice(e instanceof Error ? e.message : "导入失败");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div className="px-5 space-y-6">
-      <div className="grid grid-cols-2 gap-3">
-        {items.map(it => (
+    <section className="px-5 pb-6">
+      <div className="bg-[#FFFDF6] rounded-3xl p-4">
+        <h2 className="font-bold flex gap-2">
+          <DatabaseBackup />
+          本地备份
+        </h2>
+        <p className="text-xs text-[#264653]/50 mt-1">
+          整库导出包含活动及归档宠物、记录、物品和照片。
+        </p>
+        <div className="grid grid-cols-2 gap-2 mt-3">
           <button
-            key={it.label}
-            type="button"
-            onClick={() => it.type && onAddRecord(it.type)}
-            disabled={!it.type}
-            className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5 text-left disabled:cursor-default active:enabled:scale-[0.98] transition"
+            disabled={busy}
+            onClick={() => void exp()}
+            className="secondary"
           >
-            <div className={`w-9 h-9 rounded-xl flex items-center justify-center mb-2 ${it.cls}`}>
-              <it.icon size={18} />
-            </div>
-            <p className="text-xl font-bold">{it.value}</p>
-            <p className="text-xs text-[#264653]/50 mt-0.5">{it.label}</p>
+            <Download size={15} />
+            导出备份
           </button>
-        ))}
-      </div>
-
-      <section className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
-        <div className="flex items-center justify-between gap-3 mb-3">
-          <h2 className="font-semibold">体重趋势</h2>
           <button
-            type="button"
-            onClick={() => onAddRecord('weight')}
-            className="text-xs font-semibold text-[#C76E2B] bg-[#F4A261]/15 rounded-full px-3 py-1.5"
+            disabled={busy}
+            onClick={() => void imp()}
+            className="secondary"
           >
-            记录体重
+            <Upload size={15} />
+            导入备份
           </button>
         </div>
-        {weights.length >= 2 ? <WeightChart data={weights} /> : (
-          <p className="text-sm text-[#264653]/50 py-6 text-center">
-            记录两次以上体重后，这里会出现趋势曲线
+        {notice && (
+          <p className="text-xs mt-2 flex gap-1">
+            <CheckCircle2 size={13} />
+            {notice}
           </p>
         )}
-      </section>
-    </div>
-  )
-}
-
-function WeightChart({ data }: { data: DogRecord[] }) {
-  const W = 320, H = 120, P = 24
-  const vals = data.map(d => d.value!)
-  const min = Math.min(...vals), max = Math.max(...vals)
-  const span = max - min || 1
-  const x = (i: number) => P + (i / Math.max(data.length - 1, 1)) * (W - P * 2)
-  const y = (v: number) => H - P - ((v - min) / span) * (H - P * 2)
-  const pts = data.map((d, i) => `${x(i)},${y(d.value!)}`).join(' ')
-  return (
-    <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
-      <polyline points={pts} fill="none" stroke="#F4A261" strokeWidth="2.5" strokeLinejoin="round" strokeLinecap="round" />
-      {data.map((d, i) => (
-        <g key={d.id}>
-          <circle cx={x(i)} cy={y(d.value!)} r="4" fill="#F4A261" />
-          <text x={x(i)} y={y(d.value!) - 9} textAnchor="middle" fontSize="10" fill="#264653" opacity="0.75">
-            {d.value}
-          </text>
-        </g>
-      ))}
-      <text x={P} y={H - 6} fontSize="9" fill="#264653" opacity="0.4">{fmtDate(data[0].time).label}</text>
-      <text x={W - P} y={H - 6} fontSize="9" fill="#264653" opacity="0.4" textAnchor="end">{fmtDate(data[data.length - 1].time).label}</text>
-    </svg>
-  )
-}
-
-/* ---------------- 我的（狗狗档案） ---------------- */
-
-function ProfilePage({ profile, onSave }: { profile: DogProfile; onSave: (p: DogProfile) => void }) {
-  const [draft, setDraft] = useState(profile)
-  const [editing, setEditing] = useState(false)
-  const [saved, setSaved] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
-
-  const field = 'mt-1 w-full bg-[#F5F0E1] rounded-2xl px-4 py-2.5 text-sm outline-none focus:ring-2 ring-[#F4A261]/40'
-  const genderLabel = profile.gender === 'girl' ? '妹妹' : '弟弟'
-  const neuteredLabel = profile.neutered === 'yes' ? '已绝育' : '未绝育'
-
-  const startEditing = () => {
-    setDraft(profile)
-    setSaved(false)
-    setEditing(true)
-  }
-
-  const cancelEditing = () => {
-    setDraft(profile)
-    setEditing(false)
-  }
-
-  const saveProfile = () => {
-    onSave(draft)
-    setEditing(false)
-    setSaved(true)
-    setTimeout(() => setSaved(false), 1500)
-  }
-
-  return (
-    <div className="px-5 space-y-3">
-      <article className="relative overflow-hidden rounded-[2rem] bg-[#FFFDF6] p-4 shadow-sm shadow-[#264653]/5">
-        <div className="absolute -right-10 -top-12 h-32 w-32 rounded-full bg-[#A8DADC]/20" />
-        <div className="relative flex items-center gap-4">
-          <div className="h-20 w-20 shrink-0 overflow-hidden rounded-3xl bg-[#E8DCC4] flex items-center justify-center">
-            {profile.avatar
-              ? <img src={profile.avatar} alt={profile.name || '狗狗头像'} className="h-full w-full object-cover" />
-              : <Dog size={34} className="text-[#264653]/50" />}
-          </div>
-          <div className="min-w-0 flex-1">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <h2 className="truncate text-xl font-bold">{profile.name || '给它起个名字吧'}</h2>
-                <p className="mt-0.5 truncate text-sm text-[#264653]/50">{profile.breed || '等待填写品种'}</p>
-              </div>
-              <button
-                type="button"
-                onClick={startEditing}
-                className="flex shrink-0 items-center gap-1 rounded-full bg-[#F4A261]/15 px-3 py-1.5 text-xs font-semibold text-[#C76E2B] active:scale-95 transition"
-              >
-                <Pencil size={12} /> {saved ? '已保存' : '编辑'}
-              </button>
-            </div>
-            <div className="mt-3 flex flex-wrap gap-1.5 text-[11px] text-[#264653]/65">
-              <span className="rounded-full bg-[#F5F0E1] px-2.5 py-1">{genderLabel}</span>
-              <span className="rounded-full bg-[#F5F0E1] px-2.5 py-1">{neuteredLabel}</span>
-            </div>
-          </div>
-        </div>
-        {(profile.birthday || profile.homeDate) && (
-          <div className="relative mt-4 grid grid-cols-2 gap-2 border-t border-[#264653]/8 pt-3 text-xs text-[#264653]/60">
-            <span className="flex items-center gap-1.5">
-              <Cake size={13} className="text-[#F4A261]" />
-              {profile.birthday ? calcAge(profile.birthday) : '生日待填写'}
-            </span>
-            <span className="flex items-center gap-1.5">
-              <PawPrint size={13} className="text-[#2A7F83]" />
-              {profile.homeDate ? daysTogether(profile.homeDate) : '到家日待填写'}
-            </span>
-          </div>
-        )}
-      </article>
-
-      {editing && (
-        <section className="rounded-[2rem] bg-[#FFFDF6] p-4 shadow-sm shadow-[#264653]/5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div>
-              <h3 className="font-bold">编辑名片</h3>
-              <p className="text-[11px] text-[#264653]/45">完善一次，平时保持清爽</p>
-            </div>
-            <button type="button" onClick={cancelEditing} className="rounded-full p-2 text-[#264653]/40" aria-label="取消编辑">
-              <X size={18} />
-            </button>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button type="button" onClick={() => fileRef.current?.click()} className="relative shrink-0">
-              <div className="h-16 w-16 overflow-hidden rounded-2xl bg-[#E8DCC4] flex items-center justify-center">
-                {draft.avatar
-                  ? <img src={draft.avatar} alt="" className="h-full w-full object-cover" />
-                  : <Dog size={28} className="text-[#264653]/50" />}
-              </div>
-              <span className="absolute -bottom-1 -right-1 flex h-6 w-6 items-center justify-center rounded-full bg-[#F4A261] text-white">
-                <Camera size={12} />
-              </span>
-            </button>
-            <div className="grid min-w-0 flex-1 grid-cols-2 gap-2">
-              <input value={draft.name} onChange={e => setDraft(d => ({ ...d, name: e.target.value }))} placeholder="名字" aria-label="名字" className={field} />
-              <input value={draft.breed} onChange={e => setDraft(d => ({ ...d, breed: e.target.value }))} placeholder="品种" aria-label="品种" className={field} />
-            </div>
-            <input ref={fileRef} type="file" accept="image/*" className="hidden"
-              onChange={e => readImage(e.target.files?.[0], url => setDraft(d => ({ ...d, avatar: url })))} />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <label className="block">
-              <span className="text-[11px] text-[#264653]/50">生日</span>
-              <input type="date" value={draft.birthday} onChange={e => setDraft(d => ({ ...d, birthday: e.target.value }))} className={field} />
-            </label>
-            <label className="block">
-              <span className="text-[11px] text-[#264653]/50">到家日</span>
-              <input type="date" value={draft.homeDate} onChange={e => setDraft(d => ({ ...d, homeDate: e.target.value }))} className={field} />
-            </label>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="grid grid-cols-2 gap-1.5">
-              {(['boy', 'girl'] as const).map(g => (
-                <button type="button" key={g} onClick={() => setDraft(d => ({ ...d, gender: g }))}
-                  className={`rounded-2xl py-2 text-xs transition ${draft.gender === g ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/65'}`}>
-                  {g === 'boy' ? '弟弟' : '妹妹'}
-                </button>
-              ))}
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {([['yes', '已绝育'], ['no', '未绝育']] as const).map(([v, label]) => (
-                <button type="button" key={v} onClick={() => setDraft(d => ({ ...d, neutered: v }))}
-                  className={`rounded-2xl py-2 text-xs transition ${draft.neutered === v ? 'bg-[#F4A261] text-white font-semibold' : 'bg-[#F5F0E1] text-[#264653]/65'}`}>
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2 pt-1">
-            <button type="button" onClick={cancelEditing} className="rounded-2xl bg-[#F5F0E1] py-2.5 text-sm font-semibold text-[#264653]/65">取消</button>
-            <button type="button" onClick={saveProfile} className="rounded-2xl bg-[#F4A261] py-2.5 text-sm font-bold text-white active:scale-[0.98] transition">保存名片</button>
-          </div>
-        </section>
-      )}
-    </div>
-  )
+      </div>
+    </section>
+  );
 }

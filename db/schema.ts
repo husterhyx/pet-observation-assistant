@@ -6,8 +6,9 @@ const legacyMetadataColumns = {
   deletedAt: text("deletedAt"),
 };
 
-export const dogProfiles = sqliteTable("dog_profiles", {
+export const petProfiles = sqliteTable("pet_profiles", {
   id: text("id").primaryKey(),
+  species: text("species", { enum: ["dog", "cat"] }).notNull(),
   name: text("name").default("").notNull(),
   breed: text("breed").default("").notNull(),
   birthday: text("birthday").default("").notNull(),
@@ -15,13 +16,15 @@ export const dogProfiles = sqliteTable("dog_profiles", {
   gender: text("gender", { enum: ["boy", "girl"] }).default("boy").notNull(),
   neutered: text("neutered", { enum: ["", "yes", "no"] }).default("").notNull(),
   avatarAttachmentId: text("avatarAttachmentId"),
+  archivedAt: text("archivedAt"),
   ...legacyMetadataColumns,
 });
 
-export const dogRecords = sqliteTable(
-  "dog_records",
+export const petRecords = sqliteTable(
+  "pet_records",
   {
     id: text("id").primaryKey(),
+    petId: text("petId").notNull(),
     type: text("type").notNull(),
     title: text("title").notNull(),
     note: text("note").notNull(),
@@ -31,26 +34,28 @@ export const dogRecords = sqliteTable(
     createdAt: text("createdAt").notNull(),
     ...legacyMetadataColumns,
   },
-  (table) => [index("records_time_idx").on(table.time)],
+  (table) => [index("pet_records_pet_time_idx").on(table.petId, table.time)],
 );
 
 export const dailyPhotos = sqliteTable(
   "daily_photos",
   {
     id: text("id").primaryKey(),
+    petId: text("petId").notNull(),
     date: text("date").notNull(),
     photoAttachmentId: text("photoAttachmentId").notNull(),
     caption: text("caption").default("").notNull(),
     createdAt: text("createdAt").notNull(),
     ...legacyMetadataColumns,
   },
-  (table) => [uniqueIndex("photos_date_idx").on(table.date)],
+  (table) => [uniqueIndex("photos_pet_date_idx").on(table.petId, table.date)],
 );
 
 export const supplies = sqliteTable(
   "supplies",
   {
     id: text("id").primaryKey(),
+    petId: text("petId"),
     name: text("name").notNull(),
     brand: text("brand").default("").notNull(),
     variant: text("variant").default("").notNull(),
@@ -62,7 +67,7 @@ export const supplies = sqliteTable(
     note: text("note").default("").notNull(),
     ...legacyMetadataColumns,
   },
-  (table) => [index("supplies_updated_idx").on(table.updatedAt)],
+  (table) => [index("supplies_pet_updated_idx").on(table.petId, table.updatedAt)],
 );
 
 export const attachments = sqliteTable("attachments", {
@@ -78,7 +83,7 @@ export const appSettings = sqliteTable("app_settings", {
   value: text("value").notNull(),
 });
 
-export type DogProfileRow = typeof dogProfiles.$inferSelect;
-export type DogRecordRow = typeof dogRecords.$inferSelect;
+export type PetProfileRow = typeof petProfiles.$inferSelect;
+export type PetRecordRow = typeof petRecords.$inferSelect;
 export type DailyPhotoRow = typeof dailyPhotos.$inferSelect;
 export type SupplyRow = typeof supplies.$inferSelect;

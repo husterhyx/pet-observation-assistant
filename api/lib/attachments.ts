@@ -4,7 +4,7 @@ import path from "node:path";
 import { eq } from "drizzle-orm";
 import { attachments } from "@db/schema";
 import { env } from "./env";
-import { getDb } from "../queries/connection";
+import { getDb, getSqlite } from "../queries/connection";
 
 const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 const MIME_EXTENSIONS: Record<string, string> = {
@@ -14,7 +14,11 @@ const MIME_EXTENSIONS: Record<string, string> = {
   "image/gif": "gif",
 };
 
-export async function storeAttachmentBuffer(id: string, mimeType: string, buffer: Buffer) {
+export async function storeAttachmentBuffer(
+  id: string,
+  mimeType: string,
+  buffer: Buffer
+) {
   const normalizedMime = mimeType.toLowerCase().split(";")[0];
   const extension = MIME_EXTENSIONS[normalizedMime];
   if (!extension) throw new Error("Unsupported image type");
@@ -24,10 +28,17 @@ export async function storeAttachmentBuffer(id: string, mimeType: string, buffer
   const actualId = createHash("sha256").update(buffer).digest("hex");
   if (actualId !== id) throw new Error("Attachment hash mismatch");
   const filePath = path.join(env.dataDir, "uploads", `${id}.${extension}`);
-  if (!fs.existsSync(filePath)) fs.writeFileSync(filePath, buffer, { flag: "wx" });
+  if (!fs.existsSync(filePath))
+    fs.writeFileSync(filePath, buffer, { flag: "wx" });
   await getDb()
     .insert(attachments)
-    .values({ id, mimeType: normalizedMime, size: buffer.length, extension, createdAt: new Date().toISOString() })
+    .values({
+      id,
+      mimeType: normalizedMime,
+      size: buffer.length,
+      extension,
+      createdAt: new Date().toISOString(),
+    })
     .onConflictDoNothing();
 }
 
@@ -66,10 +77,45 @@ export async function persistImage(value: string | undefined) {
 }
 
 export async function findAttachment(id: string) {
-  const row = await getDb().query.attachments.findFirst({ where: eq(attachments.id, id) });
+  const row = await getDb().query.attachments.findFirst({
+    where: eq(attachments.id, id),
+  });
   if (!row) return null;
   return {
     ...row,
     filePath: path.join(env.dataDir, "uploads", `${row.id}.${row.extension}`),
   };
+}
+
+export function pruneUnusedAttachments() {
+  const sqlite = getSqlite();
+  const referenced = new Set<string>();
+  const sources = [
+    ["pet_profiles", "avatarAttachmentId"],
+    ["pet_records", "photoAttachmentId"],
+    ["daily_photos", "photoAttachmentId"],
+    ["supplies", "photoAttachmentId"],
+  ] as const;
+  for (const [table, column] of sources) {
+    const rows = sqlite
+      .prepare(
+        `SELECT DISTINCT ${column} AS id FROM ${table} WHERE ${column} IS NOT NULL`
+      )
+      .all() as Array<{ id: string }>;
+    for (const row of rows) referenced.add(row.id);
+  }
+  const stale = sqlite
+    .prepare("SELECT id, extension FROM attachments")
+    .all() as Array<{ id: string; extension: string }>;
+  const remove = sqlite.prepare("DELETE FROM attachments WHERE id = ?");
+  for (const item of stale)
+    if (!referenced.has(item.id)) {
+      const filePath = path.join(
+        env.dataDir,
+        "uploads",
+        `${item.id}.${item.extension}`
+      );
+      if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
+      remove.run(item.id);
+    }
 }

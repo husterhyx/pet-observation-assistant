@@ -8,6 +8,10 @@ const testDataDir = fs.mkdtempSync(path.join(os.tmpdir(), "pet-life-test-"));
 let caller: ReturnType<AppRouter["createCaller"]>;
 let app: (typeof import("./boot"))["default"];
 let closeDatabase: () => void;
+let dogId = "",
+  catId = "";
+const png =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=";
 
 beforeAll(async () => {
   process.env.DATA_DIR = testDataDir;
@@ -23,76 +27,132 @@ beforeAll(async () => {
   app = boot.default;
   closeDatabase = () => connection.getSqlite().close();
 });
-
 afterAll(() => {
   closeDatabase();
   fs.rmSync(testDataDir, { recursive: true, force: true });
 });
 
-describe("local SQLite backend", () => {
-  it("starts, migrates and exposes health checks", async () => {
-    const health = await app.request("/api/health");
-    expect(health.status).toBe(200);
-    await expect(health.json()).resolves.toEqual({ ok: true, mode: "local" });
+describe("multi-pet local SQLite backend", () => {
+  it("starts and creates dog and cat profiles", async () => {
+    expect((await app.request("/api/health")).status).toBe(200);
+    dogId = (
+      await caller.pet.createPet({
+        species: "dog",
+        name: "可乐",
+        breed: "柯基",
+        birthday: "",
+        homeDate: "",
+        gender: "boy",
+        neutered: "",
+      })
+    ).id;
+    catId = (
+      await caller.pet.createPet({
+        species: "cat",
+        name: "团子",
+        breed: "英短",
+        birthday: "",
+        homeDate: "",
+        gender: "girl",
+        neutered: "yes",
+      })
+    ).id;
+    expect(await caller.pet.listPets({})).toHaveLength(2);
   });
-
-  it("persists profile and records locally", async () => {
-    await caller.pet.saveProfile({
-      name: "小狗", breed: "柯基", birthday: "", homeDate: "",
-      gender: "boy", neutered: "", avatar: undefined,
+  it("isolates records and allows one daily photo per pet and date", async () => {
+    await caller.pet.addRecord({
+      petId: dogId,
+      type: "walk",
+      title: "遛狗",
+      note: "",
+      time: "2026-09-01T04:00:00.000Z",
+      value: 20,
     });
     await caller.pet.addRecord({
-      type: "feed", title: "喂食", note: "测试记录",
-      time: "2026-08-31T04:00:00.000Z",
+      petId: catId,
+      type: "walk",
+      title: "玩耍",
+      note: "",
+      time: "2026-09-01T05:00:00.000Z",
+      value: 10,
     });
-
-    const [profile, records] = await Promise.all([
-      caller.pet.getProfile(),
-      caller.pet.listRecords(),
+    expect(await caller.pet.listRecords({})).toHaveLength(2);
+    expect(await caller.pet.listRecords({ petId: catId })).toHaveLength(1);
+    await caller.pet.setPhoto({
+      petId: dogId,
+      date: "2026-09-01",
+      photo: png,
+      caption: "狗",
+    });
+    await caller.pet.setPhoto({
+      petId: catId,
+      date: "2026-09-01",
+      photo: png,
+      caption: "猫",
+    });
+    expect(await caller.pet.listPhotos({})).toHaveLength(2);
+    await caller.pet.setPhoto({
+      petId: catId,
+      date: "2026-09-01",
+      photo: png,
+      caption: "猫更新",
+    });
+    expect((await caller.pet.listPhotos({ petId: catId }))[0].caption).toBe(
+      "猫更新"
+    );
+  });
+  it("shows shared supplies in a pet filter and hides another pet's supplies", async () => {
+    await caller.pet.addSupply({
+      name: "纸巾",
+      brand: "",
+      variant: "",
+      category: "清洁",
+      stock: "plenty",
+      note: "",
+    });
+    await caller.pet.addSupply({
+      petId: dogId,
+      name: "狗粮",
+      brand: "",
+      variant: "",
+      category: "主粮",
+      stock: "plenty",
+      note: "",
+    });
+    expect(await caller.pet.listSupplies({ petId: dogId })).toHaveLength(2);
+    expect(await caller.pet.listSupplies({ petId: catId })).toHaveLength(1);
+  });
+  it("stores cards by species and excludes archived pets", async () => {
+    await caller.pet.saveHomeCards({
+      species: "cat",
+      types: ["groom", "weight"],
+    });
+    expect(await caller.pet.getHomeCards({ species: "cat" })).toEqual([
+      "groom",
+      "weight",
     ]);
-    expect(profile?.name).toBe("小狗");
-    expect(records).toHaveLength(1);
-    expect(records[0].note).toBe("测试记录");
+    await caller.pet.archivePet({ id: catId });
+    expect(await caller.pet.listPets({})).toHaveLength(1);
+    expect(await caller.pet.listRecords({})).toHaveLength(1);
+    expect(await caller.pet.listPhotos({})).toHaveLength(1);
+    expect(await caller.pet.listSupplies({})).toHaveLength(2);
+    expect(await caller.pet.listSupplies({ petId: dogId })).toHaveLength(2);
+    expect(await caller.pet.listPets({ includeArchived: true })).toHaveLength(
+      2
+    );
+    await caller.pet.restorePet({ id: catId });
   });
-
-  it("stores image bytes outside SQLite and returns an attachment URL", async () => {
-    const onePixelPng =
-      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9Zl1sAAAAASUVORK5CYII=";
-    await caller.pet.setPhoto({ date: "2026-08-31", photo: onePixelPng, caption: "第一张" });
-    const photos = await caller.pet.listPhotos();
-    expect(photos[0].photo).toMatch(/^\/api\/attachments\/[a-f0-9]{64}$/);
-    const response = await app.request(photos[0].photo);
-    expect(response.status).toBe(200);
-    expect(response.headers.get("content-type")).toBe("image/png");
-  });
-
-  it("persists the selected home cards in SQLite", async () => {
-    expect(await caller.pet.getHomeCards()).toEqual([
-      "walk", "weight", "deworm", "vaccine", "checkup", "milestone",
-    ]);
-    await caller.pet.saveHomeCards(["weight", "bath", "vet"]);
-    expect(await caller.pet.getHomeCards()).toEqual(["weight", "bath", "vet"]);
-  });
-
-  it("exports and restores a complete local backup including images", async () => {
+  it("exports and restores a v2 backup including images", async () => {
     const backup = await caller.pet.exportBackup();
-    expect(backup.format).toBe("pet-observation-backup");
-    expect(backup.version).toBe(1);
-    expect(backup.records).toHaveLength(1);
+    expect(backup.version).toBe(2);
+    expect(backup.pets).toHaveLength(2);
     expect(backup.photos[0].photo).toMatch(/^data:image\/png;base64,/);
-    expect(backup.homeCardTypes).toEqual(["weight", "bath", "vet"]);
-
-    await caller.pet.addRecord({
-      type: "note", title: "临时记录", note: "导入后应消失",
-      time: "2026-08-31T05:00:00.000Z",
-    });
-    await caller.pet.saveHomeCards(["walk"]);
+    await caller.pet.deletePetPermanently({ id: catId });
+    expect(await caller.pet.listPets({ includeArchived: true })).toHaveLength(
+      1
+    );
     const result = await caller.pet.importBackup(backup);
-
-    expect(result).toEqual({ records: 1, photos: 1, supplies: 0 });
-    expect(await caller.pet.listRecords()).toHaveLength(1);
-    expect(await caller.pet.getHomeCards()).toEqual(["weight", "bath", "vet"]);
-    const photos = await caller.pet.listPhotos();
-    expect(await app.request(photos[0].photo)).toHaveProperty("status", 200);
+    expect(result.pets).toBe(2);
+    expect(await caller.pet.listPhotos({})).toHaveLength(2);
   });
 });

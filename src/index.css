@@ -73,3 +73,15 @@
     @apply bg-background text-foreground;
   }
 }
+
+@layer components {
+  .field {
+    @apply w-full rounded-2xl bg-[#F5F0E1] px-4 py-3 text-sm outline-none focus:ring-2 focus:ring-[#F4A261]/40;
+  }
+  .primary {
+    @apply w-full rounded-2xl bg-[#F4A261] py-3 font-bold text-white disabled:opacity-40;
+  }
+  .secondary {
+    @apply flex items-center justify-center gap-1 rounded-2xl bg-[#F5F0E1] px-3 py-2.5 text-sm text-[#264653] disabled:opacity-40;
+  }
+}

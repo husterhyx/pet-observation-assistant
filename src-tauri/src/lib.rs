@@ -71,6 +71,12 @@ pub fn run() {
             sql: include_str!("../../db/migrations/0002_remove_remote_sync.sql"),
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 3,
+            description: "add_multi_pet_support",
+            sql: include_str!("../../db/migrations/0003_multi_pet.sql"),
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

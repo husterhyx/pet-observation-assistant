@@ -19,8 +19,11 @@ export type RecordType =
   | 'note'       // 随手记
   | 'milestone'  // 大事件
 
-export interface DogRecord {
+export type PetSpecies = 'dog' | 'cat'
+
+export interface PetRecord {
   id: string
+  petId: string
   type: RecordType
   title: string
   note: string
@@ -29,7 +32,9 @@ export interface DogRecord {
   photo?: string // dataURL
 }
 
-export interface DogProfile {
+export interface PetProfile {
+  id: string
+  species: PetSpecies
   name: string
   breed: string
   birthday: string // YYYY-MM-DD
@@ -37,10 +42,12 @@ export interface DogProfile {
   gender: 'boy' | 'girl'
   neutered: 'yes' | 'no' | '' // 是否绝育
   avatar?: string // dataURL
+  archivedAt?: string
 }
 
 export interface DailyPhoto {
   id: string
+  petId: string
   date: string // YYYY-MM-DD
   photo: string // dataURL
   caption: string
@@ -50,6 +57,7 @@ export type StockLevel = 'plenty' | 'low' | 'empty'
 
 export interface SupplyItem {
   id: string
+  petId?: string
   name: string
   brand: string      // 品牌
   variant: string    // 款式 / 口味 / 规格
