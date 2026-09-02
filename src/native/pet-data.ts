@@ -1,6 +1,7 @@
 import type Database from "@tauri-apps/plugin-sql";
 import type {
   DailyPhoto,
+  FamilyProfile,
   PetProfile,
   PetRecord,
   PetSpecies,
@@ -8,6 +9,8 @@ import type {
   SupplyItem,
 } from "@/types";
 import {
+  DEFAULT_FAMILY_PROFILE,
+  familyProfileSchema,
   normalizePetBackup,
   petBackupSchema,
   type PetBackup,
@@ -294,6 +297,24 @@ export async function saveNativeHomeCards(
   await setSetting(`homeCardTypes:${species}`, JSON.stringify(types));
 }
 
+export async function getNativeFamilyProfile(): Promise<FamilyProfile> {
+  const stored = await getSetting("familyProfile");
+  if (stored)
+    try {
+      const profile = familyProfileSchema.safeParse(JSON.parse(stored));
+      if (profile.success) return profile.data;
+    } catch {
+      /* use default */
+    }
+  return DEFAULT_FAMILY_PROFILE;
+}
+
+export async function saveNativeFamilyProfile(profile: FamilyProfile) {
+  const value = familyProfileSchema.parse(profile);
+  await setSetting("familyProfile", JSON.stringify(value));
+  return value;
+}
+
 export async function listNativeRecords(
   petId?: string,
   includeArchived = false
@@ -528,14 +549,16 @@ export async function removeNativeSupply(id: string) {
 }
 
 export async function exportNativeBackup(): Promise<PetBackup> {
-  const [pets, records, photos, supplies, dog, cat] = await Promise.all([
-    listNativePets(true),
-    listNativeRecords(undefined, true),
-    listNativePhotos(undefined, true),
-    listNativeSupplies(undefined, true),
-    getNativeHomeCards("dog"),
-    getNativeHomeCards("cat"),
-  ]);
+  const [pets, records, photos, supplies, dog, cat, familyProfile] =
+    await Promise.all([
+      listNativePets(true),
+      listNativeRecords(undefined, true),
+      listNativePhotos(undefined, true),
+      listNativeSupplies(undefined, true),
+      getNativeHomeCards("dog"),
+      getNativeHomeCards("cat"),
+      getNativeFamilyProfile(),
+    ]);
   return petBackupSchema.parse({
     format: "pet-observation-backup",
     version: 2,
@@ -544,6 +567,7 @@ export async function exportNativeBackup(): Promise<PetBackup> {
     records,
     photos,
     supplies,
+    familyProfile,
     homeCardTypes: { dog, cat },
   });
 }
@@ -645,6 +669,10 @@ export async function importNativeBackup(value: unknown) {
           JSON.stringify(backup.homeCardTypes[species]),
         ]
       );
+    await db.execute(
+      `INSERT INTO app_settings (key,value) VALUES ($1,$2) ON CONFLICT(key) DO UPDATE SET value=excluded.value`,
+      ["familyProfile", JSON.stringify(backup.familyProfile)]
+    );
   });
   await pruneNativeAttachments();
   return {

@@ -68,6 +68,7 @@ import {
   SUPPLY_CATEGORIES,
   expiryInfo,
   supplyCategoryTracksStock,
+  type FamilyProfile,
   type PetProfile,
   type PetRecord,
   type PetSpecies,
@@ -235,27 +236,39 @@ function MainApp() {
       <div className="w-full max-w-md pb-24">
         <Header data={data} />
         <PetFilter data={data} />
-        {tab === "diary" && (
-          <>
-            <QuickPanel
-              key={
-                data.selectedPetId ??
-                `all:${data.activePets.map(p => p.id).join("|")}`
-              }
-              data={data}
-              onDetailed={openRecord}
-              onEditCards={() => setCardsOpen(true)}
-            />
-            <Timeline
-              records={data.records}
-              pets={data.activePets}
-              onDelete={data.removeRecord}
-            />
-          </>
-        )}
-        {tab === "photos" && <Photos data={data} />}{" "}
-        {tab === "supplies" && <Supplies data={data} />}{" "}
-        {tab === "me" && <Me data={data} onRecord={openRecord} />}
+        <div className="relative">
+          <span
+            className={`absolute left-5 right-5 top-0 z-10 h-0.5 overflow-hidden rounded-full transition-opacity duration-150 ${data.isRefreshing ? "opacity-100" : "opacity-0"}`}
+          >
+            <span className="block h-full w-1/3 animate-pulse rounded-full bg-[#F4A261]" />
+          </span>
+          <div
+            aria-busy={data.isRefreshing}
+            className={`transition-opacity duration-200 ease-out ${data.isRefreshing ? "pointer-events-none opacity-55" : "opacity-100"}`}
+          >
+            {tab === "diary" && (
+              <>
+                <QuickPanel
+                  key={
+                    data.selectedPetId ??
+                    `all:${data.activePets.map(p => p.id).join("|")}`
+                  }
+                  data={data}
+                  onDetailed={openRecord}
+                  onEditCards={() => setCardsOpen(true)}
+                />
+                <Timeline
+                  records={data.records}
+                  pets={data.activePets}
+                  onDelete={data.removeRecord}
+                />
+              </>
+            )}
+            {tab === "photos" && <Photos data={data} />}{" "}
+            {tab === "supplies" && <Supplies data={data} />}{" "}
+            {tab === "me" && <Me data={data} onRecord={openRecord} />}
+          </div>
+        </div>
         <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md h-16 bg-[#FFFDF6]/95 border-t border-[#264653]/10 grid grid-cols-5 z-20">
           <Nav
             active={tab === "diary"}
@@ -331,18 +344,41 @@ function Header({ data }: { data: Data }) {
   const p = data.selectedPet;
   return (
     <header className="px-5 pt-7 pb-2 flex items-center gap-3">
-      <Avatar pet={p} size="lg" />
+      {p ? (
+        <Avatar pet={p} size="lg" />
+      ) : (
+        <FamilyAvatar profile={data.familyProfile} />
+      )}
       <div className="min-w-0">
         <h1 className="text-2xl font-bold truncate">
-          {p ? `${p.name}的小日子` : "我家的毛孩子"}
+          {p ? `${p.name}的小日子` : data.familyProfile.name}
         </h1>
         <p className="text-sm text-[#264653]/55">
-          {p
-            ? `${speciesText(p.species)} · ${p.breed || "品种待填写"} · ${data.records.length} 条记录`
-            : `${data.activePets.length} 位家庭成员 · ${data.records.length} 条记录`}
+          {data.isRefreshing
+            ? p
+              ? `${speciesText(p.species)} · ${p.breed || "品种待填写"} · 正在切换…`
+              : `${data.activePets.length} 位家庭成员 · 正在汇总…`
+            : p
+              ? `${speciesText(p.species)} · ${p.breed || "品种待填写"} · ${data.records.length} 条记录`
+              : `${data.activePets.length} 位家庭成员 · ${data.records.length} 条记录`}
         </p>
       </div>
     </header>
+  );
+}
+function FamilyAvatar({ profile }: { profile: FamilyProfile }) {
+  return (
+    <span className="w-14 h-14 rounded-full bg-[#E8DCC4] shrink-0 overflow-hidden grid place-items-center">
+      {profile.avatar ? (
+        <img
+          src={profile.avatar}
+          alt="家庭头像"
+          className="w-full h-full object-cover"
+        />
+      ) : (
+        <PawPrint size={27} className="text-[#264653]/55" />
+      )}
+    </span>
   );
 }
 function Avatar({
@@ -837,36 +873,6 @@ function RecordSheet({
     </Sheet>
   );
 }
-function PetSelect({
-  pets,
-  value,
-  onChange,
-  allowShared = false,
-}: {
-  pets: PetProfile[];
-  value: string;
-  onChange: (v: string) => void;
-  allowShared?: boolean;
-}) {
-  return (
-    <label className="block text-xs text-[#264653]/55">
-      归属
-      <StyledSelect
-        value={value}
-        onChange={onChange}
-        placeholder={allowShared ? "全家共用" : "请选择宠物"}
-        options={[
-          { value: "", label: allowShared ? "全家共用" : "请选择宠物" },
-          ...pets.map(p => ({
-            value: p.id,
-            label: `${p.name}（${speciesText(p.species)}）`,
-          })),
-        ]}
-        className="mt-1"
-      />
-    </label>
-  );
-}
 function PetMultiSelect({
   pets,
   value,
@@ -1055,15 +1061,41 @@ function Sheet({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  useEffect(() => {
+    const body = document.body;
+    const root = document.documentElement;
+    const scrollY = window.scrollY;
+    const previousBody = {
+      position: body.style.position,
+      top: body.style.top,
+      left: body.style.left,
+      right: body.style.right,
+      width: body.style.width,
+      overflow: body.style.overflow,
+    };
+    const previousOverscroll = root.style.overscrollBehavior;
+    body.style.position = "fixed";
+    body.style.top = `-${scrollY}px`;
+    body.style.left = "0";
+    body.style.right = "0";
+    body.style.width = "100%";
+    body.style.overflow = "hidden";
+    root.style.overscrollBehavior = "none";
+    return () => {
+      Object.assign(body.style, previousBody);
+      root.style.overscrollBehavior = previousOverscroll;
+      window.scrollTo({ top: scrollY, left: 0, behavior: "instant" });
+    };
+  }, []);
   return (
     <div
-      className="fixed inset-0 z-40 flex items-end justify-center"
+      className="fixed inset-0 z-40 flex items-end justify-center overflow-hidden overscroll-none"
       onClick={onClose}
     >
       <div className="absolute inset-0 bg-[#264653]/40" />
       <section
         onClick={e => e.stopPropagation()}
-        className="relative w-full max-w-md bg-[#FFFDF6] rounded-t-[2rem] p-5 pb-8 max-h-[90dvh] overflow-y-auto"
+        className="relative w-full max-w-md bg-[#FFFDF6] rounded-t-[2rem] p-5 pb-8 max-h-[90dvh] overflow-y-auto overscroll-contain touch-pan-y"
       >
         <div className="flex justify-between">
           <h2 className="text-lg font-bold">{title}</h2>
@@ -1126,7 +1158,11 @@ function Photos({ data }: { data: Data }) {
   );
 }
 function PhotoSheet({ data, onClose }: { data: Data; onClose: () => void }) {
-  const [petId, setPetId] = useState(data.selectedPetId ?? "");
+  const [petIds, setPetIds] = useState<string[]>(() =>
+    data.selectedPetId
+      ? [data.selectedPetId]
+      : data.activePets.map(pet => pet.id)
+  );
   const [photo, setPhoto] = useState<string>();
   const [caption, setCaption] = useState("");
   const [busy, setBusy] = useState(false);
@@ -1141,15 +1177,26 @@ function PhotoSheet({ data, onClose }: { data: Data; onClose: () => void }) {
       .finally(() => setReading(false));
   };
   const save = async () => {
-    if (!petId || !photo) return;
+    if (!petIds.length || !photo) return;
     setBusy(true);
-    await data.setDailyPhoto(petId, today(), photo, caption.trim());
-    onClose();
+    try {
+      for (const petId of petIds) {
+        await data.setDailyPhoto(petId, today(), photo, caption.trim());
+      }
+      onClose();
+    } finally {
+      setBusy(false);
+    }
   };
   return (
     <Sheet title="添加今日照片" onClose={onClose}>
       <div className="space-y-3 mt-4">
-        <PetSelect pets={data.activePets} value={petId} onChange={setPetId} />
+        <PetMultiSelect
+          pets={data.activePets}
+          value={petIds}
+          onChange={setPetIds}
+          label="照片里的宠物"
+        />
         {reading ? (
           <div className="aspect-square bg-[#F5F0E1] rounded-3xl grid place-items-center">
             <RefreshCw className="animate-spin" />
@@ -1199,10 +1246,10 @@ function PhotoSheet({ data, onClose }: { data: Data; onClose: () => void }) {
         />
         <button
           onClick={() => void save()}
-          disabled={!petId || !photo || busy || reading}
+          disabled={!petIds.length || !photo || busy || reading}
           className="primary"
         >
-          {busy ? "正在保存…" : "保存今日照片"}
+          {busy ? `正在保存到 ${petIds.length} 只宠物…` : "保存今日照片"}
         </button>
       </div>
     </Sheet>
@@ -1534,8 +1581,132 @@ function Me({
         selectedPet={data.selectedPet}
         onRecord={onRecord}
       />
-      <DataBackup data={data} />
+      <SettingsSection data={data} />
     </div>
+  );
+}
+function SettingsSection({ data }: { data: Data }) {
+  return (
+    <section className="space-y-3">
+      <div className="px-5">
+        <p className="text-[11px] font-semibold tracking-[.18em] text-[#9A7B1E]">
+          SETTINGS
+        </p>
+        <h2 className="text-lg font-bold mt-0.5">设置</h2>
+        <p className="text-xs text-[#264653]/45 mt-0.5">
+          管理家庭信息与本地数据
+        </p>
+      </div>
+      <FamilyProfileCard data={data} />
+      <DataBackup data={data} />
+    </section>
+  );
+}
+function FamilyProfileCard({ data }: { data: Data }) {
+  const [name, setName] = useState(data.familyProfile.name);
+  const [avatar, setAvatar] = useState(data.familyProfile.avatar);
+  const [reading, setReading] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [notice, setNotice] = useState("");
+  const picker = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setName(data.familyProfile.name);
+    setAvatar(data.familyProfile.avatar);
+  }, [data.familyProfile]);
+
+  const save = async (nextAvatar = avatar) => {
+    const nextName = name.trim() || data.familyProfile.name;
+    setSaving(true);
+    setNotice("");
+    try {
+      await data.updateFamilyProfile({ name: nextName, avatar: nextAvatar });
+      setName(nextName);
+      setNotice("家庭名片已保存");
+    } catch {
+      setNotice("保存失败，请稍后重试");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const chooseAvatar = async (file?: File) => {
+    if (!file) return;
+    setReading(true);
+    setNotice("");
+    try {
+      const nextAvatar = await imageFromFile(file);
+      setAvatar(nextAvatar);
+      await save(nextAvatar);
+    } catch {
+      setNotice("图片处理失败，请重新选择");
+    } finally {
+      setReading(false);
+      if (picker.current) picker.current.value = "";
+    }
+  };
+
+  return (
+    <section className="px-5">
+      <div className="relative overflow-hidden rounded-[2rem] bg-[#264653] p-4 text-white shadow-sm">
+        <span className="absolute -right-8 -top-12 h-36 w-36 rounded-full bg-[#A8DADC]/15" />
+        <span className="absolute -bottom-14 left-20 h-28 w-28 rounded-full bg-[#F4A261]/12" />
+        <div className="relative flex items-center gap-4">
+          <button
+            type="button"
+            onClick={() => picker.current?.click()}
+            disabled={reading || saving}
+            aria-label="更换家庭头像"
+            className="relative shrink-0 rounded-full border-2 border-white/70 p-1 shadow-sm active:scale-95 transition"
+          >
+            <FamilyAvatar profile={{ name, avatar }} />
+            <span className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-[#F4A261] text-white grid place-items-center border-2 border-[#264653]">
+              {reading ? (
+                <RefreshCw size={13} className="animate-spin" />
+              ) : (
+                <Camera size={13} />
+              )}
+            </span>
+          </button>
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-semibold tracking-[.18em] text-[#A8DADC]">
+              FAMILY NAME
+            </p>
+            <input
+              value={name}
+              onChange={event => setName(event.target.value)}
+              maxLength={100}
+              aria-label="家庭名称"
+              className="mt-1 w-full border-b border-white/25 bg-transparent pb-1 text-xl font-bold text-white outline-none placeholder:text-white/35 focus:border-[#F4A261]"
+              placeholder="给这个家起个名字"
+            />
+            <p className="mt-1 text-[10px] text-white/45">点击头像更换照片</p>
+          </div>
+        </div>
+        <div className="relative mt-3 flex items-center justify-between gap-3">
+          <span
+            className={`text-[10px] ${notice.includes("失败") ? "text-[#F4A261]" : "text-white/55"}`}
+          >
+            {notice || "名称将显示在首页顶部"}
+          </span>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={!name.trim() || saving || reading}
+            className="rounded-full bg-[#F4A261] px-4 py-2 text-xs font-bold text-white disabled:opacity-45"
+          >
+            {saving ? "保存中…" : "保存名称"}
+          </button>
+        </div>
+        <input
+          ref={picker}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={event => void chooseAvatar(event.target.files?.[0])}
+        />
+      </div>
+    </section>
   );
 }
 function PetManager({ data }: { data: Data }) {
@@ -1544,18 +1715,20 @@ function PetManager({ data }: { data: Data }) {
   return (
     <section className="px-5">
       <div className="flex justify-between items-end mb-3">
-        <div>
+        <div className="min-w-0">
           <p className="text-[11px] font-semibold tracking-[.18em] text-[#F4A261]">
             FAMILY PROFILE
           </p>
-          <h2 className="text-lg font-bold mt-0.5">我的毛孩子</h2>
+          <h2 className="text-lg font-bold mt-0.5 truncate">
+            {data.familyProfile.name}
+          </h2>
           <p className="text-xs text-[#264653]/45 mt-0.5">
             {data.activePets.length} 位家庭成员
           </p>
         </div>
         <button
           onClick={() => setEditing("new")}
-          className="rounded-full bg-[#F4A261] text-white pl-3 pr-3.5 py-2 text-xs font-semibold flex items-center gap-1 shadow-sm active:scale-95 transition"
+          className="shrink-0 rounded-full bg-[#F4A261] text-white pl-3 pr-3.5 py-2 text-xs font-semibold flex items-center gap-1 shadow-sm active:scale-95 transition"
         >
           <Plus size={16} />
           添加

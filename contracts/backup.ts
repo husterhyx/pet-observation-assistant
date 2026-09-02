@@ -49,6 +49,11 @@ const imageDataUrlSchema = z
     /^data:image\/(?:jpeg|png|webp|gif);base64,[A-Za-z0-9+/]+={0,2}$/,
     "图片数据无效"
   );
+export const familyProfileSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  avatar: imageDataUrlSchema.optional(),
+});
+export const DEFAULT_FAMILY_PROFILE = { name: "我家的毛孩子" } as const;
 const profileFields = {
   name: z.string().min(1).max(100),
   breed: z.string().max(100),
@@ -139,6 +144,9 @@ export const petBackupSchema = z
         })
       )
       .max(10_000),
+    familyProfile: familyProfileSchema
+      .optional()
+      .default(DEFAULT_FAMILY_PROFILE),
     homeCardTypes: z.object({ dog: homeCardsSchema, cat: homeCardsSchema }),
   })
   .superRefine((backup, context) => {
@@ -207,6 +215,7 @@ export function normalizePetBackup(value: unknown): PetBackup {
     })),
     photos: legacy.data.photos.map(photo => ({ ...photo, petId })),
     supplies: legacy.data.supplies,
+    familyProfile: DEFAULT_FAMILY_PROFILE,
     homeCardTypes: {
       dog: legacy.data.homeCardTypes,
       cat: ["walk", "weight", "groom", "deworm", "vaccine", "checkup"],

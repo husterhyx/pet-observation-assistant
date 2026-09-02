@@ -3,6 +3,7 @@ import { isTauri } from "@tauri-apps/api/core";
 import { trpc } from "@/providers/trpc";
 import type {
   DailyPhoto,
+  FamilyProfile,
   PetProfile,
   PetRecord,
   PetSpecies,
@@ -10,7 +11,7 @@ import type {
   StockLevel,
   SupplyItem,
 } from "@/types";
-import type { PetBackup } from "@contracts/backup";
+import { DEFAULT_FAMILY_PROFILE, type PetBackup } from "@contracts/backup";
 import { useNativePetData } from "./useNativePetData";
 
 export type HomeCardType = Exclude<RecordType, "feed" | "water" | "poop">;
@@ -19,21 +20,28 @@ function useWebPetData() {
   const [selectedPetId, setSelectedPetId] = useState<string>();
   const utils = trpc.useUtils();
   const petsQ = trpc.pet.listPets.useQuery({ includeArchived: true });
+  const familyQ = trpc.pet.getFamilyProfile.useQuery();
   const recordsQ = trpc.pet.listRecords.useQuery(
-    selectedPetId ? { petId: selectedPetId } : {}
+    selectedPetId ? { petId: selectedPetId } : {},
+    { placeholderData: previous => previous }
   );
   const photosQ = trpc.pet.listPhotos.useQuery(
-    selectedPetId ? { petId: selectedPetId } : {}
+    selectedPetId ? { petId: selectedPetId } : {},
+    { placeholderData: previous => previous }
   );
   const suppliesQ = trpc.pet.listSupplies.useQuery(
-    selectedPetId ? { petId: selectedPetId } : {}
+    selectedPetId ? { petId: selectedPetId } : {},
+    { placeholderData: previous => previous }
   );
   const activePets: PetProfile[] = (petsQ.data ?? []).filter(
     p => !p.archivedAt
   ) as PetProfile[];
   const selectedPet = activePets.find(p => p.id === selectedPetId);
   const cardSpecies: PetSpecies = selectedPet?.species ?? "dog";
-  const cardsQ = trpc.pet.getHomeCards.useQuery({ species: cardSpecies });
+  const cardsQ = trpc.pet.getHomeCards.useQuery(
+    { species: cardSpecies },
+    { placeholderData: previous => previous }
+  );
   const invalidateAll = () => utils.pet.invalidate();
   const mutations = {
     createPet: trpc.pet.createPet.useMutation({ onSuccess: invalidateAll }),
@@ -57,6 +65,10 @@ function useWebPetData() {
       onSuccess: invalidateAll,
     }),
     saveCards: trpc.pet.saveHomeCards.useMutation({ onSuccess: invalidateAll }),
+    saveFamilyProfile: trpc.pet.saveFamilyProfile.useMutation({
+      onSuccess: profile =>
+        utils.pet.getFamilyProfile.setData(undefined, profile),
+    }),
     importBackup: trpc.pet.importBackup.useMutation({
       onSuccess: invalidateAll,
     }),
@@ -72,9 +84,15 @@ function useWebPetData() {
   return {
     isLoading:
       petsQ.isLoading ||
-      recordsQ.isLoading ||
-      photosQ.isLoading ||
-      suppliesQ.isLoading,
+      familyQ.isLoading ||
+      (!recordsQ.data && recordsQ.isLoading) ||
+      (!photosQ.data && photosQ.isLoading) ||
+      (!suppliesQ.data && suppliesQ.isLoading),
+    isRefreshing:
+      recordsQ.isFetching ||
+      photosQ.isFetching ||
+      suppliesQ.isFetching ||
+      cardsQ.isFetching,
     pets: (petsQ.data ?? []) as PetProfile[],
     activePets,
     selectedPetId,
@@ -84,6 +102,7 @@ function useWebPetData() {
     photos: (photosQ.data ?? []) as DailyPhoto[],
     supplies,
     homeCardTypes: (cardsQ.data ?? []) as HomeCardType[],
+    familyProfile: (familyQ.data ?? DEFAULT_FAMILY_PROFILE) as FamilyProfile,
     cardSpecies,
     createPet: (p: Omit<PetProfile, "id" | "archivedAt">) =>
       mutations.createPet.mutateAsync(p),
@@ -118,6 +137,8 @@ function useWebPetData() {
     removeSupply: (id: string) => mutations.removeSupply.mutateAsync({ id }),
     setHomeCards: (species: PetSpecies, types: HomeCardType[]) =>
       mutations.saveCards.mutateAsync({ species, types }),
+    updateFamilyProfile: (profile: FamilyProfile) =>
+      mutations.saveFamilyProfile.mutateAsync(profile),
     createBackup: () => utils.client.pet.exportBackup.query(),
     restoreBackup: (backup: PetBackup) =>
       mutations.importBackup.mutateAsync(backup),

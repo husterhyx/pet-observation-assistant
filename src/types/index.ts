@@ -21,6 +21,11 @@ export type RecordType =
 
 export type PetSpecies = "dog" | "cat";
 
+export interface FamilyProfile {
+  name: string;
+  avatar?: string;
+}
+
 export interface PetRecord {
   id: string;
   petId: string;

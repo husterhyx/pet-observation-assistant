@@ -21,12 +21,20 @@ const current = {
   records: [],
   photos: [],
   supplies: [],
+  familyProfile: { name: "团子的家" },
   homeCardTypes: { dog: ["walk" as const], cat: ["groom" as const] },
 };
 
 describe("multi-pet backup contract", () => {
   it("accepts v2 and round-trips", () =>
     expect(parsePetBackupText(JSON.stringify(current))).toEqual(current));
+  it("adds the default family profile to an older v2 backup", () => {
+    const olderBackup: Partial<typeof current> = structuredClone(current);
+    delete olderBackup.familyProfile;
+    expect(normalizePetBackup(olderBackup).familyProfile).toEqual({
+      name: "我家的毛孩子",
+    });
+  });
   it("converts a v1 backup into one dog", () => {
     const result = normalizePetBackup({
       format: "pet-observation-backup",

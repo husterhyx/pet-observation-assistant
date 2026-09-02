@@ -170,10 +170,21 @@ describe("multi-pet local SQLite backend", () => {
     );
     await caller.pet.restorePet({ id: catId });
   });
+  it("stores the editable family title and avatar", async () => {
+    expect(await caller.pet.getFamilyProfile()).toEqual({
+      name: "我家的毛孩子",
+    });
+    await caller.pet.saveFamilyProfile({ name: "可乐和团子的家", avatar: png });
+    expect(await caller.pet.getFamilyProfile()).toEqual({
+      name: "可乐和团子的家",
+      avatar: png,
+    });
+  });
   it("exports and restores a v2 backup including images", async () => {
     const backup = await caller.pet.exportBackup();
     expect(backup.version).toBe(2);
     expect(backup.pets).toHaveLength(2);
+    expect(backup.familyProfile.name).toBe("可乐和团子的家");
     expect(backup.photos[0].photo).toMatch(/^data:image\/png;base64,/);
     await caller.pet.deletePetPermanently({ id: catId });
     expect(await caller.pet.listPets({ includeArchived: true })).toHaveLength(

@@ -12,6 +12,8 @@ import {
 } from "./lib/attachments";
 import { getSetting, setSetting } from "./lib/settings";
 import {
+  DEFAULT_FAMILY_PROFILE,
+  familyProfileSchema,
   homeCardTypeSchema,
   legacyPetBackupSchema,
   normalizePetBackup,
@@ -53,6 +55,17 @@ function parseHomeCards(species: "dog" | "cat", stored?: string) {
       /* use defaults */
     }
   return [...DEFAULT_HOME_CARDS[species]];
+}
+
+function parseFamilyProfile(stored?: string) {
+  if (stored)
+    try {
+      const profile = familyProfileSchema.safeParse(JSON.parse(stored));
+      if (profile.success) return profile.data;
+    } catch {
+      /* use default */
+    }
+  return DEFAULT_FAMILY_PROFILE;
 }
 
 async function requireActivePet(petId: string) {
@@ -110,6 +123,15 @@ function petDto(row: typeof petProfiles.$inferSelect) {
 }
 
 export const petRouter = createRouter({
+  getFamilyProfile: publicQuery.query(async () => {
+    return parseFamilyProfile(await getSetting("familyProfile"));
+  }),
+  saveFamilyProfile: publicQuery
+    .input(familyProfileSchema)
+    .mutation(async ({ input }) => {
+      await setSetting("familyProfile", JSON.stringify(input));
+      return input;
+    }),
   listPets: publicQuery
     .input(z.object({ includeArchived: z.boolean().optional() }).optional())
     .query(async ({ input }) => {
@@ -476,27 +498,35 @@ export const petRouter = createRouter({
       await getDb().delete(supplies).where(eq(supplies.id, input.id));
     }),
   exportBackup: publicQuery.query(async () => {
-    const [pets, records, photos, supplyRows, dogCards, catCards] =
-      await Promise.all([
-        getDb().select().from(petProfiles).where(isNull(petProfiles.deletedAt)),
-        getDb()
-          .select()
-          .from(petRecords)
-          .where(isNull(petRecords.deletedAt))
-          .orderBy(desc(petRecords.time)),
-        getDb()
-          .select()
-          .from(dailyPhotos)
-          .where(isNull(dailyPhotos.deletedAt))
-          .orderBy(desc(dailyPhotos.date)),
-        getDb()
-          .select()
-          .from(supplies)
-          .where(isNull(supplies.deletedAt))
-          .orderBy(desc(supplies.updatedAt)),
-        getSetting("homeCardTypes:dog"),
-        getSetting("homeCardTypes:cat"),
-      ]);
+    const [
+      pets,
+      records,
+      photos,
+      supplyRows,
+      dogCards,
+      catCards,
+      familyProfile,
+    ] = await Promise.all([
+      getDb().select().from(petProfiles).where(isNull(petProfiles.deletedAt)),
+      getDb()
+        .select()
+        .from(petRecords)
+        .where(isNull(petRecords.deletedAt))
+        .orderBy(desc(petRecords.time)),
+      getDb()
+        .select()
+        .from(dailyPhotos)
+        .where(isNull(dailyPhotos.deletedAt))
+        .orderBy(desc(dailyPhotos.date)),
+      getDb()
+        .select()
+        .from(supplies)
+        .where(isNull(supplies.deletedAt))
+        .orderBy(desc(supplies.updatedAt)),
+      getSetting("homeCardTypes:dog"),
+      getSetting("homeCardTypes:cat"),
+      getSetting("familyProfile"),
+    ]);
     return petBackupSchema.parse({
       format: "pet-observation-backup",
       version: 2,
@@ -546,6 +576,7 @@ export const petRouter = createRouter({
           updatedAt: s.updatedAt,
         }))
       ),
+      familyProfile: parseFamilyProfile(familyProfile),
       homeCardTypes: {
         dog: parseHomeCards("dog", dogCards),
         cat: parseHomeCards("cat", catCards),
@@ -659,6 +690,12 @@ export const petRouter = createRouter({
               `homeCardTypes:${species}`,
               JSON.stringify(backup.homeCardTypes[species])
             );
+        sqlite
+          .prepare(
+            `INSERT INTO app_settings (key,value) VALUES (?,?)
+        ON CONFLICT(key) DO UPDATE SET value=excluded.value`
+          )
+          .run("familyProfile", JSON.stringify(backup.familyProfile));
       })();
       pruneUnusedAttachments();
       return {
