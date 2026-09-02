@@ -1052,6 +1052,270 @@ function ImagePicker({
     </div>
   );
 }
+function AvatarImagePicker({
+  value,
+  species,
+  onChange,
+}: {
+  value?: string;
+  species: PetSpecies;
+  onChange: (value: string) => void;
+}) {
+  const input = useRef<HTMLInputElement>(null);
+  const [source, setSource] = useState<string>();
+  const [busy, setBusy] = useState(false);
+  const Icon = species === "cat" ? Cat : Dog;
+  const choose = async (file?: File) => {
+    if (!file) return;
+    setBusy(true);
+    try {
+      setSource(await imageFromFile(file));
+    } finally {
+      setBusy(false);
+      if (input.current) input.current.value = "";
+    }
+  };
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => input.current?.click()}
+        disabled={busy}
+        className="w-full rounded-2xl bg-[#F5F0E1] p-3 flex items-center gap-3 text-left disabled:opacity-50"
+      >
+        <span className="w-14 h-14 rounded-full bg-[#E8DCC4] overflow-hidden grid place-items-center shrink-0">
+          {value ? (
+            <img
+              src={value}
+              alt="宠物头像"
+              className="w-full h-full object-cover"
+            />
+          ) : (
+            <Icon size={25} className="text-[#264653]/50" />
+          )}
+        </span>
+        <span className="min-w-0 flex-1">
+          <b className="block text-sm">宠物头像</b>
+          <small className="block mt-0.5 text-[#264653]/45">
+            {busy ? "正在读取图片…" : "选择图片后可调整显示范围"}
+          </small>
+        </span>
+        <Camera size={18} className="text-[#C76E2B]" />
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        className="hidden"
+        onChange={event => void choose(event.target.files?.[0])}
+      />
+      {source && (
+        <AvatarCropSheet
+          source={source}
+          title="调整宠物头像"
+          onCancel={() => setSource(undefined)}
+          onConfirm={cropped => {
+            onChange(cropped);
+            setSource(undefined);
+          }}
+        />
+      )}
+    </>
+  );
+}
+
+function AvatarCropSheet({
+  source,
+  title,
+  onCancel,
+  onConfirm,
+}: {
+  source: string;
+  title: string;
+  onCancel: () => void;
+  onConfirm: (value: string) => void;
+}) {
+  const canvas = useRef<HTMLCanvasElement>(null);
+  const image = useRef<HTMLImageElement | null>(null);
+  const drag = useRef<{ x: number; y: number } | null>(null);
+  const [ready, setReady] = useState(false);
+  const [zoom, setZoom] = useState(1);
+  const [position, setPosition] = useState({ x: 50, y: 50 });
+
+  useEffect(() => {
+    const next = new Image();
+    next.onload = () => {
+      image.current = next;
+      setReady(true);
+    };
+    next.src = source;
+    return () => {
+      image.current = null;
+    };
+  }, [source]);
+
+  useEffect(() => {
+    const target = canvas.current;
+    const picture = image.current;
+    if (!target || !picture || !ready) return;
+    const context = target.getContext("2d");
+    if (!context) return;
+    const naturalWidth = picture.naturalWidth;
+    const naturalHeight = picture.naturalHeight;
+    const cropSize = Math.min(naturalWidth, naturalHeight) / zoom;
+    const sourceX =
+      (naturalWidth - cropSize) * Math.min(1, Math.max(0, position.x / 100));
+    const sourceY =
+      (naturalHeight - cropSize) * Math.min(1, Math.max(0, position.y / 100));
+    context.clearRect(0, 0, target.width, target.height);
+    context.drawImage(
+      picture,
+      sourceX,
+      sourceY,
+      cropSize,
+      cropSize,
+      0,
+      0,
+      target.width,
+      target.height
+    );
+  }, [position, ready, zoom]);
+
+  const move = (event: React.PointerEvent<HTMLCanvasElement>) => {
+    const previous = drag.current;
+    if (!previous) return;
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const sensitivity = 100 / Math.max(1, zoom);
+    const deltaX = ((event.clientX - previous.x) / bounds.width) * sensitivity;
+    const deltaY = ((event.clientY - previous.y) / bounds.height) * sensitivity;
+    drag.current = { x: event.clientX, y: event.clientY };
+    setPosition(current => ({
+      x: Math.min(100, Math.max(0, current.x - deltaX)),
+      y: Math.min(100, Math.max(0, current.y - deltaY)),
+    }));
+  };
+
+  return (
+    <Sheet title={title} onClose={onCancel}>
+      <div className="mt-4 space-y-4">
+        <div className="mx-auto w-[min(72vw,18rem)]">
+          <div className="relative rounded-full border-4 border-[#FFFDF6] bg-[#E8DCC4] shadow-lg ring-2 ring-[#F4A261]/45 overflow-hidden">
+            <canvas
+              ref={canvas}
+              width={512}
+              height={512}
+              aria-label="头像显示范围预览"
+              onPointerDown={event => {
+                drag.current = { x: event.clientX, y: event.clientY };
+                event.currentTarget.setPointerCapture(event.pointerId);
+              }}
+              onPointerMove={move}
+              onPointerUp={event => {
+                drag.current = null;
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              }}
+              onPointerCancel={() => {
+                drag.current = null;
+              }}
+              className="block aspect-square w-full touch-none cursor-move"
+            />
+            {!ready && (
+              <span className="absolute inset-0 grid place-items-center text-[#264653]/45">
+                <RefreshCw className="animate-spin" />
+              </span>
+            )}
+          </div>
+          <p className="mt-2 text-center text-xs text-[#264653]/45">
+            拖动图片调整头像中心
+          </p>
+        </div>
+        <div className="rounded-3xl bg-[#F5F0E1] p-4 space-y-3">
+          <CropRange
+            label="缩放"
+            value={zoom}
+            min={1}
+            max={3}
+            step={0.05}
+            onChange={setZoom}
+          />
+          <CropRange
+            label="横向位置"
+            value={position.x}
+            min={0}
+            max={100}
+            step={1}
+            onChange={x => setPosition(current => ({ ...current, x }))}
+          />
+          <CropRange
+            label="纵向位置"
+            value={position.y}
+            min={0}
+            max={100}
+            step={1}
+            onChange={y => setPosition(current => ({ ...current, y }))}
+          />
+          <button
+            type="button"
+            onClick={() => {
+              setZoom(1);
+              setPosition({ x: 50, y: 50 });
+            }}
+            className="text-xs font-semibold text-[#C76E2B]"
+          >
+            恢复居中
+          </button>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <button type="button" onClick={onCancel} className="secondary">
+            取消
+          </button>
+          <button
+            type="button"
+            disabled={!ready}
+            onClick={() => {
+              if (canvas.current)
+                onConfirm(canvas.current.toDataURL("image/jpeg", 0.86));
+            }}
+            className="primary"
+          >
+            使用这个范围
+          </button>
+        </div>
+      </div>
+    </Sheet>
+  );
+}
+
+function CropRange({
+  label,
+  value,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="grid grid-cols-[5rem_1fr] items-center gap-3 text-xs text-[#264653]/60">
+      {label}
+      <input
+        type="range"
+        value={value}
+        min={min}
+        max={max}
+        step={step}
+        onChange={event => onChange(Number(event.target.value))}
+        className="accent-[#F4A261]"
+      />
+    </label>
+  );
+}
 function Sheet({
   title,
   onClose,
@@ -1608,6 +1872,7 @@ function FamilyProfileCard({ data }: { data: Data }) {
   const [reading, setReading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState("");
+  const [cropSource, setCropSource] = useState<string>();
   const picker = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -1635,9 +1900,7 @@ function FamilyProfileCard({ data }: { data: Data }) {
     setReading(true);
     setNotice("");
     try {
-      const nextAvatar = await imageFromFile(file);
-      setAvatar(nextAvatar);
-      await save(nextAvatar);
+      setCropSource(await imageFromFile(file));
     } catch {
       setNotice("图片处理失败，请重新选择");
     } finally {
@@ -1647,66 +1910,80 @@ function FamilyProfileCard({ data }: { data: Data }) {
   };
 
   return (
-    <section className="px-5">
-      <div className="relative overflow-hidden rounded-[2rem] bg-[#264653] p-4 text-white shadow-sm">
-        <span className="absolute -right-8 -top-12 h-36 w-36 rounded-full bg-[#A8DADC]/15" />
-        <span className="absolute -bottom-14 left-20 h-28 w-28 rounded-full bg-[#F4A261]/12" />
-        <div className="relative flex items-center gap-4">
-          <button
-            type="button"
-            onClick={() => picker.current?.click()}
-            disabled={reading || saving}
-            aria-label="更换家庭头像"
-            className="relative shrink-0 rounded-full border-2 border-white/70 p-1 shadow-sm active:scale-95 transition"
-          >
-            <FamilyAvatar profile={{ name, avatar }} />
-            <span className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-[#F4A261] text-white grid place-items-center border-2 border-[#264653]">
-              {reading ? (
-                <RefreshCw size={13} className="animate-spin" />
-              ) : (
-                <Camera size={13} />
-              )}
-            </span>
-          </button>
-          <div className="min-w-0 flex-1">
-            <p className="text-[10px] font-semibold tracking-[.18em] text-[#A8DADC]">
-              FAMILY NAME
-            </p>
-            <input
-              value={name}
-              onChange={event => setName(event.target.value)}
-              maxLength={100}
-              aria-label="家庭名称"
-              className="mt-1 w-full border-b border-white/25 bg-transparent pb-1 text-xl font-bold text-white outline-none placeholder:text-white/35 focus:border-[#F4A261]"
-              placeholder="给这个家起个名字"
-            />
-            <p className="mt-1 text-[10px] text-white/45">点击头像更换照片</p>
+    <>
+      <section className="px-5">
+        <div className="relative overflow-hidden rounded-[2rem] bg-[#264653] p-4 text-white shadow-sm">
+          <span className="absolute -right-8 -top-12 h-36 w-36 rounded-full bg-[#A8DADC]/15" />
+          <span className="absolute -bottom-14 left-20 h-28 w-28 rounded-full bg-[#F4A261]/12" />
+          <div className="relative flex items-center gap-4">
+            <button
+              type="button"
+              onClick={() => picker.current?.click()}
+              disabled={reading || saving}
+              aria-label="更换家庭头像"
+              className="relative shrink-0 rounded-full border-2 border-white/70 p-1 shadow-sm active:scale-95 transition"
+            >
+              <FamilyAvatar profile={{ name, avatar }} />
+              <span className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-[#F4A261] text-white grid place-items-center border-2 border-[#264653]">
+                {reading ? (
+                  <RefreshCw size={13} className="animate-spin" />
+                ) : (
+                  <Camera size={13} />
+                )}
+              </span>
+            </button>
+            <div className="min-w-0 flex-1">
+              <p className="text-[10px] font-semibold tracking-[.18em] text-[#A8DADC]">
+                FAMILY NAME
+              </p>
+              <input
+                value={name}
+                onChange={event => setName(event.target.value)}
+                maxLength={100}
+                aria-label="家庭名称"
+                className="mt-1 w-full border-b border-white/25 bg-transparent pb-1 text-xl font-bold text-white outline-none placeholder:text-white/35 focus:border-[#F4A261]"
+                placeholder="给这个家起个名字"
+              />
+              <p className="mt-1 text-[10px] text-white/45">点击头像更换照片</p>
+            </div>
           </div>
+          <div className="relative mt-3 flex items-center justify-between gap-3">
+            <span
+              className={`text-[10px] ${notice.includes("失败") ? "text-[#F4A261]" : "text-white/55"}`}
+            >
+              {notice || "名称将显示在首页顶部"}
+            </span>
+            <button
+              type="button"
+              onClick={() => void save()}
+              disabled={!name.trim() || saving || reading}
+              className="rounded-full bg-[#F4A261] px-4 py-2 text-xs font-bold text-white disabled:opacity-45"
+            >
+              {saving ? "保存中…" : "保存名称"}
+            </button>
+          </div>
+          <input
+            ref={picker}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={event => void chooseAvatar(event.target.files?.[0])}
+          />
         </div>
-        <div className="relative mt-3 flex items-center justify-between gap-3">
-          <span
-            className={`text-[10px] ${notice.includes("失败") ? "text-[#F4A261]" : "text-white/55"}`}
-          >
-            {notice || "名称将显示在首页顶部"}
-          </span>
-          <button
-            type="button"
-            onClick={() => void save()}
-            disabled={!name.trim() || saving || reading}
-            className="rounded-full bg-[#F4A261] px-4 py-2 text-xs font-bold text-white disabled:opacity-45"
-          >
-            {saving ? "保存中…" : "保存名称"}
-          </button>
-        </div>
-        <input
-          ref={picker}
-          type="file"
-          accept="image/*"
-          className="hidden"
-          onChange={event => void chooseAvatar(event.target.files?.[0])}
+      </section>
+      {cropSource && (
+        <AvatarCropSheet
+          source={cropSource}
+          title="调整家庭头像"
+          onCancel={() => setCropSource(undefined)}
+          onConfirm={cropped => {
+            setCropSource(undefined);
+            setAvatar(cropped);
+            void save(cropped);
+          }}
         />
-      </div>
-    </section>
+      )}
+    </>
   );
 }
 function PetManager({ data }: { data: Data }) {
@@ -1951,8 +2228,9 @@ function PetForm({
             ]}
           />
         </div>
-        <ImagePicker
+        <AvatarImagePicker
           value={draft.avatar}
+          species={draft.species}
           onChange={avatar => setDraft(d => ({ ...d, avatar }))}
         />
         <button

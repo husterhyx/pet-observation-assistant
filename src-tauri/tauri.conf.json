@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "宠物观察小助手",
-  "version": "1.0.0",
+  "productName": "宠物小助手",
+  "version": "1.1.0",
   "identifier": "app.petobservation.local",
   "build": {
     "frontendDist": "../dist/public",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "宠物观察小助手",
+        "title": "宠物小助手",
         "width": 430,
         "height": 932,
         "minWidth": 360,
