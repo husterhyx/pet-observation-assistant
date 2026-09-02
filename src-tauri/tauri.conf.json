@@ -2,7 +2,7 @@
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "宠物观察小助手",
   "version": "1.0.0",
-  "identifier": "top.yuxiang66.petobservation",
+  "identifier": "app.petobservation.local",
   "build": {
     "frontendDist": "../dist/public",
     "devUrl": "http://127.0.0.1:3000",

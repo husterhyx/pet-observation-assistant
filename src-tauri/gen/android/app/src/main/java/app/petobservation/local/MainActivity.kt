@@ -1,4 +1,4 @@
-package top.yuxiang66.petobservation
+package app.petobservation.local
 
 import android.os.Bundle
 import androidx.activity.enableEdgeToEdge

@@ -12,9 +12,9 @@ $repoRoot = Split-Path -Parent $PSScriptRoot
 $sdkRoot = "D:\Android\Sdk"
 $ndkRoot = Join-Path $sdkRoot "ndk\29.0.13846066"
 $javaRoot = "C:\Program Files\Microsoft\jdk-17.0.13.11-hotspot"
-$gradleRoot = "D:\Android\GradleCache"
 $avdRoot = "D:\Android\Avd"
 $buildRoot = "D:\Android\Build\pet-observation"
+$gradleRoot = Join-Path $buildRoot "gradle-cache"
 $rustTargetRoot = Join-Path $buildRoot "rust-target"
 $androidBuildProject = Join-Path $buildRoot "android"
 $tauri = Join-Path $repoRoot "node_modules\.bin\tauri.cmd"
@@ -152,6 +152,36 @@ try {
         & npm.cmd run build:web
         if ($LASTEXITCODE -ne 0) { throw "Frontend build failed with exit code $LASTEXITCODE" }
 
+        # Android bridge files are generated per application ID and ignored by Git.
+        # Remove bridge output left by another branch, then recreate the current one.
+        $tauriConfigPath = Join-Path $repoRoot "src-tauri\tauri.conf.json"
+        $applicationId = ([IO.File]::ReadAllText($tauriConfigPath, [Text.Encoding]::UTF8) | ConvertFrom-Json).identifier
+        $javaSourceRoot = Join-Path $androidProject "app\src\main\java"
+        $expectedGeneratedDir = Join-Path $javaSourceRoot ($applicationId.Replace(".", "\") + "\generated")
+        $javaSourceRootFull = [IO.Path]::GetFullPath($javaSourceRoot) + [IO.Path]::DirectorySeparatorChar
+        if (Test-Path -LiteralPath $javaSourceRoot) {
+            Get-ChildItem -LiteralPath $javaSourceRoot -Directory -Recurse -Filter generated | ForEach-Object {
+                $generatedDirFull = [IO.Path]::GetFullPath($_.FullName)
+                if (-not $generatedDirFull.StartsWith($javaSourceRootFull, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw "Unexpected generated Android bridge path: $generatedDirFull"
+                }
+                if (-not $generatedDirFull.Equals([IO.Path]::GetFullPath($expectedGeneratedDir), [StringComparison]::OrdinalIgnoreCase)) {
+                    Remove-Item -LiteralPath $generatedDirFull -Recurse -Force
+                }
+            }
+        }
+        $generatedActivity = Join-Path $expectedGeneratedDir "TauriActivity.kt"
+        if (-not (Test-Path -LiteralPath $generatedActivity)) {
+            & $tauri android init --ci --skip-targets-install
+            if ($LASTEXITCODE -ne 0) { throw "Tauri Android bridge generation failed with exit code $LASTEXITCODE" }
+        }
+        $bridgeNeedsGeneration = -not (Test-Path -LiteralPath $generatedActivity)
+        $env:WRY_ANDROID_PACKAGE = $applicationId
+        $env:TAURI_ANDROID_PACKAGE_UNESCAPED = $applicationId
+        $env:WRY_ANDROID_LIBRARY = "pet_observation_mobile_lib"
+        $env:WRY_ANDROID_KOTLIN_FILES_OUT_DIR = $expectedGeneratedDir
+        $env:TAURI_ANDROID_PROJECT_PATH = $androidProject
+
         if ($Action -eq "build-emulator") {
             $rustTarget = "x86_64-linux-android"
             $clangPrefix = "x86_64-linux-android24"
@@ -197,6 +227,11 @@ try {
             "--lib"
         )
         if ($isRelease) { $cargoArguments += "--release" }
+        if ($bridgeNeedsGeneration) {
+            # Tauri's build script does not track package-name environment changes itself.
+            & cargo clean --package tauri --target $rustTarget --manifest-path (Join-Path $repoRoot "src-tauri\Cargo.toml")
+            if ($LASTEXITCODE -ne 0) { throw "Tauri Android bridge cache cleanup failed with exit code $LASTEXITCODE" }
+        }
         & cargo @cargoArguments
         if ($LASTEXITCODE -ne 0) { throw "Rust Android build failed with exit code $LASTEXITCODE" }
 
@@ -214,7 +249,8 @@ try {
             throw "Unexpected Android build path: $androidBuildProjectFull"
         }
         New-Item -ItemType Directory -Path $androidBuildProjectFull -Force | Out-Null
-        & robocopy.exe $androidProject $androidBuildProjectFull /E /XD .gradle build "app\build" "buildSrc\build" /NFL /NDL /NJH /NJS /NP
+        # The build directory is validated above; mirroring prevents package files from another branch leaking in.
+        & robocopy.exe $androidProject $androidBuildProjectFull /MIR /XD .gradle build "app\build" "buildSrc\build" /NFL /NDL /NJH /NJS /NP
         if ($LASTEXITCODE -gt 7) { throw "Android project copy failed with exit code $LASTEXITCODE" }
 
         $sourceLib = Join-Path $rustTargetRoot "$rustTarget\$rustProfile\libpet_observation_mobile_lib.so"
