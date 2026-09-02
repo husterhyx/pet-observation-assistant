@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { isTauri } from "@tauri-apps/api/core";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
@@ -1439,6 +1439,58 @@ function Sheet({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const onCloseRef = useRef(onClose);
+  const historyMarker = `pet-sheet-${useId()}`;
+  const historyPushedRef = useRef(false);
+  const dismissedRef = useRef(false);
+  const cleanupTimerRef = useRef<number | undefined>(undefined);
+
+  useEffect(() => {
+    onCloseRef.current = onClose;
+  }, [onClose]);
+
+  useEffect(() => {
+    const marker = historyMarker;
+    if (cleanupTimerRef.current !== undefined) {
+      window.clearTimeout(cleanupTimerRef.current);
+      cleanupTimerRef.current = undefined;
+    }
+    if (!historyPushedRef.current) {
+      window.history.pushState(
+        { ...window.history.state, petSheetMarker: marker },
+        ""
+      );
+      historyPushedRef.current = true;
+    }
+
+    const handlePopState = () => {
+      if (window.history.state?.petSheetMarker === marker) return;
+      if (dismissedRef.current) return;
+      dismissedRef.current = true;
+      onCloseRef.current();
+    };
+    window.addEventListener("popstate", handlePopState);
+    return () => {
+      window.removeEventListener("popstate", handlePopState);
+      if (dismissedRef.current) return;
+      cleanupTimerRef.current = window.setTimeout(() => {
+        if (window.history.state?.petSheetMarker === marker) {
+          dismissedRef.current = true;
+          window.history.back();
+        }
+      }, 0);
+    };
+  }, [historyMarker]);
+
+  const dismiss = () => {
+    if (dismissedRef.current) return;
+    dismissedRef.current = true;
+    if (window.history.state?.petSheetMarker === historyMarker) {
+      window.history.back();
+    }
+    onCloseRef.current();
+  };
+
   useEffect(() => {
     const body = document.body;
     const root = document.documentElement;
@@ -1468,7 +1520,7 @@ function Sheet({
   return (
     <div
       className="fixed inset-0 z-40 flex items-end justify-center overflow-hidden overscroll-none"
-      onClick={onClose}
+      onClick={dismiss}
     >
       <div className="absolute inset-0 bg-[#264653]/40" />
       <section
@@ -1477,7 +1529,7 @@ function Sheet({
       >
         <div className="flex justify-between">
           <h2 className="text-lg font-bold">{title}</h2>
-          <button onClick={onClose}>
+          <button onClick={dismiss}>
             <X />
           </button>
         </div>

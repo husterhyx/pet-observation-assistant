@@ -2,20 +2,34 @@
 
 面向个人使用的猫狗生活记录应用。`main` 是本地数据版：Android 使用应用内 SQLite，电脑开发环境使用仅监听本机的 Hono + SQLite 后端；不需要账号、远程服务器、数据库服务或 API 密钥。
 
-当前版本：**1.1.1**
+当前版本：**1.1.2**
+
+## 界面预览
+
+<p align="center">
+  <img src="docs/imgs/1.jpg" alt="宠物管理与生活统计" width="23%" />
+  <img src="docs/imgs/2.jpg" alt="多宠物一键打卡与时间线" width="23%" />
+  <img src="docs/imgs/3.jpg" alt="详细生活记录菜单" width="23%" />
+  <img src="docs/imgs/4.jpg" alt="宠物物品管理" width="23%" />
+</p>
+
+<p align="center"><sub>宠物管理与统计 · 多宠物一键打卡 · 详细记录 · 物品管理</sub></p>
+
+截图中的家庭名、宠物名和记录均为界面演示数据，应用不会预置或上传这些内容。
 
 ## 主要功能
 
 - 同时管理多只猫咪和狗狗，支持全部宠物聚合视图和单宠物筛选。
-- 一键记录喂食、喂水、玩耍/遛狗和尿便；详细记录可补充时间、数值、备注与照片。
+- 可同时为一只或多只宠物一键记录喂食、喂水、玩耍/遛狗和尿便；详细记录可补充时间、数值、备注与照片。
 - 同一条记录可以关联多只宠物，时间线会合并显示参与成员。
 - 每只宠物每天可保存一张“每日一萌”，支持相册选择和直接拍照。
-- 记录体重、活动时长、驱虫、疫苗、体检、大事件等健康与成长数据，并按宠物独立展示体重趋势。
+- 记录体重、玩耍/遛弯时长、驱虫、疫苗、体检、大事件等健康与成长数据，并按宠物独立展示体重趋势。
 - 猫咪和狗狗分别保存主页健康卡片的显示项目与拖动顺序。
 - 物品可以设为全家共用或指定多只宠物；主粮、零食、清洁和药品支持库存状态，玩具与其他类别不显示余量。
 - 可编辑家庭名称、家庭头像和宠物档案；头像选图后可拖动、缩放并调整圆形显示范围。
 - 宠物支持归档、恢复和二次确认后的永久删除。
 - 支持手动检查 GitHub Release 更新，也可开启每天至多一次的自动检查；发现新版本后由系统浏览器前往 GitHub 下载。
+- 手机返回键会优先逐层收起正在显示的记录、照片、物品、档案等二级菜单，回到一级主页后才交由系统退出应用。
 
 ## 本地数据与备份
 
@@ -84,11 +98,11 @@ npm run android:build:emulator
 npm run android:build:release
 ```
 
-版本 1.1.1 的默认输出：
+版本 1.1.2 的默认输出：
 
-- 真机调试包：`dist/android/pet-observation-1.1.1-arm64-debug.apk`
-- 模拟器调试包：`dist/android/pet-observation-1.1.1-x86_64-debug.apk`
-- 正式签名包：`dist/android/pet-observation-1.1.1-arm64-release.apk`
+- 真机调试包：`dist/android/pet-observation-1.1.2-arm64-debug.apk`
+- 模拟器调试包：`dist/android/pet-observation-1.1.2-x86_64-debug.apk`
+- 正式签名包：`dist/android/pet-observation-1.1.2-arm64-release.apk`
 
 构建脚本会清理 Gradle 增量产物，使用英文路径副本规避 Windows 中文路径问题，并剥离交付 APK 中 Rust 动态库的调试符号。脚本只设置当前进程的 Android 与代理环境变量，不修改 Windows 系统配置。
 
@@ -102,7 +116,7 @@ Android 正式包名为 `app.petobservation.local`。应用只在手动检查更
 
 1. 确认 `package.json`、`src-tauri/Cargo.toml` 与 `src-tauri/tauri.conf.json` 使用相同的三段式版本号。
 2. 完成正式 APK 构建并保留脚本输出的 SHA-256。
-3. 创建与版本对应的标签，例如 `v1.1.1`；Release 不能设为草稿或预发行版本。
+3. 创建与版本对应的标签，例如 `v1.1.2`；Release 不能设为草稿或预发行版本。
 4. 上传 `dist/android/pet-observation-<版本>-arm64-release.apk`，并在发布说明中写明安装方式、主要变化、数据兼容性和 SHA-256。
 
 正式发布后，已安装应用会在下一次手动检查或每日自动检查时发现它。APK 使用 `app.petobservation.local` 包名和同一发布密钥签名时，可以覆盖安装并保留应用私有目录中的本地数据；重要升级前仍建议先导出备份。
