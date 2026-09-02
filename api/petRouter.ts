@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { z } from "zod";
-import { and, desc, eq, isNull, or } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { createRouter, publicQuery } from "./middleware";
 import { getDb, getSqlite } from "./queries/connection";
 import { dailyPhotos, petProfiles, petRecords, supplies } from "@db/schema";
@@ -65,6 +65,33 @@ async function requireActivePet(petId: string) {
   });
   if (!pet) throw new Error("请选择有效的宠物");
   return pet;
+}
+
+function parsePetIds(value: string | null | undefined, fallback?: string) {
+  if (value)
+    try {
+      const parsed = z.array(z.string().min(1)).safeParse(JSON.parse(value));
+      if (parsed.success && parsed.data.length)
+        return [...new Set(parsed.data)];
+    } catch {
+      /* use legacy association */
+    }
+  return fallback ? [fallback] : [];
+}
+
+async function requireActivePets(petIds: string[]) {
+  const unique = [...new Set(petIds)];
+  if (!unique.length) throw new Error("请至少选择一只宠物");
+  await Promise.all(unique.map(requireActivePet));
+  return unique;
+}
+
+async function activePetIds() {
+  const rows = await getDb()
+    .select({ id: petProfiles.id })
+    .from(petProfiles)
+    .where(and(isNull(petProfiles.archivedAt), isNull(petProfiles.deletedAt)));
+  return new Set(rows.map(row => row.id));
 }
 
 function petDto(row: typeof petProfiles.$inferSelect) {
@@ -154,11 +181,37 @@ export const petRouter = createRouter({
     .mutation(({ input }) => {
       const sqlite = getSqlite();
       sqlite.transaction(() => {
-        sqlite.prepare("DELETE FROM pet_records WHERE petId = ?").run(input.id);
+        for (const row of sqlite
+          .prepare("SELECT id,petId,petIds FROM pet_records")
+          .all() as { id: string; petId: string; petIds: string }[]) {
+          const remaining = parsePetIds(row.petIds, row.petId).filter(
+            id => id !== input.id
+          );
+          if (remaining.length === parsePetIds(row.petIds, row.petId).length)
+            continue;
+          if (!remaining.length)
+            sqlite.prepare("DELETE FROM pet_records WHERE id=?").run(row.id);
+          else
+            sqlite
+              .prepare("UPDATE pet_records SET petId=?,petIds=? WHERE id=?")
+              .run(remaining[0], JSON.stringify(remaining), row.id);
+        }
         sqlite
           .prepare("DELETE FROM daily_photos WHERE petId = ?")
           .run(input.id);
-        sqlite.prepare("DELETE FROM supplies WHERE petId = ?").run(input.id);
+        for (const row of sqlite
+          .prepare("SELECT id,petId,petIds FROM supplies")
+          .all() as { id: string; petId: string | null; petIds: string }[]) {
+          const current = parsePetIds(row.petIds, row.petId ?? undefined);
+          const remaining = current.filter(id => id !== input.id);
+          if (remaining.length === current.length) continue;
+          if (!remaining.length)
+            sqlite.prepare("DELETE FROM supplies WHERE id=?").run(row.id);
+          else
+            sqlite
+              .prepare("UPDATE supplies SET petId=?,petIds=? WHERE id=?")
+              .run(remaining[0], JSON.stringify(remaining), row.id);
+        }
         sqlite.prepare("DELETE FROM pet_profiles WHERE id = ?").run(input.id);
       })();
       pruneUnusedAttachments();
@@ -190,36 +243,39 @@ export const petRouter = createRouter({
       return input.types;
     }),
   listRecords: publicQuery.input(optionalPetFilter).query(async ({ input }) => {
-    const joined = await getDb()
-      .select()
-      .from(petRecords)
-      .innerJoin(petProfiles, eq(petRecords.petId, petProfiles.id))
-      .where(
-        and(
-          isNull(petRecords.deletedAt),
-          isNull(petProfiles.deletedAt),
-          isNull(petProfiles.archivedAt),
-          input?.petId ? eq(petRecords.petId, input.petId) : undefined
-        )
-      )
-      .orderBy(desc(petRecords.time))
-      .limit(10_000);
-    const rows = joined.map(item => item.pet_records);
-    return rows.map(row => ({
-      id: row.id,
-      petId: row.petId,
-      type: row.type,
-      title: row.title,
-      note: row.note,
-      time: row.time,
-      value: row.value ?? undefined,
-      photo: attachmentUrl(row.photoAttachmentId),
-    }));
+    const [rows, activeIds] = await Promise.all([
+      getDb()
+        .select()
+        .from(petRecords)
+        .where(isNull(petRecords.deletedAt))
+        .orderBy(desc(petRecords.time))
+        .limit(10_000),
+      activePetIds(),
+    ]);
+    return rows
+      .filter(row => {
+        const ids = parsePetIds(row.petIds, row.petId);
+        return input?.petId
+          ? ids.includes(input.petId)
+          : ids.some(id => activeIds.has(id));
+      })
+      .map(row => ({
+        id: row.id,
+        petId: row.petId,
+        petIds: parsePetIds(row.petIds, row.petId),
+        type: row.type,
+        title: row.title,
+        note: row.note,
+        time: row.time,
+        value: row.value ?? undefined,
+        photo: attachmentUrl(row.photoAttachmentId),
+      }));
   }),
   addRecord: publicQuery
     .input(
       z.object({
         petId: z.string().min(1),
+        petIds: z.array(z.string().min(1)).min(1).max(100).optional(),
         type: recordTypeSchema,
         title: z.string().max(100),
         note: z.string(),
@@ -229,13 +285,16 @@ export const petRouter = createRouter({
       })
     )
     .mutation(async ({ input }) => {
-      await requireActivePet(input.petId);
+      const { petIds, ...fields } = input;
+      const ids = await requireActivePets(petIds ?? [input.petId]);
       const now = new Date().toISOString();
       await getDb()
         .insert(petRecords)
         .values({
-          ...input,
+          ...fields,
           id: randomUUID(),
+          petId: ids[0],
+          petIds: JSON.stringify(ids),
           value: input.value ?? null,
           photoAttachmentId: await persistImage(input.photo),
           createdAt: now,
@@ -315,57 +374,44 @@ export const petRouter = createRouter({
   listSupplies: publicQuery
     .input(optionalPetFilter)
     .query(async ({ input }) => {
-      const rows = input?.petId
-        ? await getDb()
-            .select()
-            .from(supplies)
-            .where(
-              and(
-                or(isNull(supplies.petId), eq(supplies.petId, input.petId)),
-                isNull(supplies.deletedAt)
-              )
-            )
-            .orderBy(desc(supplies.updatedAt))
-            .limit(2_000)
-        : (
-            await getDb()
-              .select()
-              .from(supplies)
-              .leftJoin(petProfiles, eq(supplies.petId, petProfiles.id))
-              .where(
-                and(
-                  isNull(supplies.deletedAt),
-                  or(
-                    isNull(supplies.petId),
-                    and(
-                      isNull(petProfiles.deletedAt),
-                      isNull(petProfiles.archivedAt)
-                    )
-                  )
-                )
-              )
-              .orderBy(desc(supplies.updatedAt))
-              .limit(2_000)
-          ).map(item => item.supplies);
-      return rows.map(row => ({
-        id: row.id,
-        petId: row.petId ?? undefined,
-        name: row.name,
-        brand: row.brand,
-        variant: row.variant,
-        category: row.category,
-        stock: row.stock,
-        photo: attachmentUrl(row.photoAttachmentId),
-        produceDate: row.produceDate ?? undefined,
-        shelfMonths: row.shelfMonths ?? undefined,
-        note: row.note,
-        updatedAt: row.updatedAt,
-      }));
+      const [rows, activeIds] = await Promise.all([
+        getDb()
+          .select()
+          .from(supplies)
+          .where(isNull(supplies.deletedAt))
+          .orderBy(desc(supplies.updatedAt))
+          .limit(2_000),
+        activePetIds(),
+      ]);
+      return rows
+        .filter(row => {
+          const ids = parsePetIds(row.petIds, row.petId ?? undefined);
+          if (!ids.length) return true;
+          return input?.petId
+            ? ids.includes(input.petId)
+            : ids.some(id => activeIds.has(id));
+        })
+        .map(row => ({
+          id: row.id,
+          petId: row.petId ?? undefined,
+          petIds: parsePetIds(row.petIds, row.petId ?? undefined),
+          name: row.name,
+          brand: row.brand,
+          variant: row.variant,
+          category: row.category,
+          stock: row.stock,
+          photo: attachmentUrl(row.photoAttachmentId),
+          produceDate: row.produceDate ?? undefined,
+          shelfMonths: row.shelfMonths ?? undefined,
+          note: row.note,
+          updatedAt: row.updatedAt,
+        }));
     }),
   addSupply: publicQuery
     .input(
       z.object({
         petId: z.string().min(1).optional(),
+        petIds: z.array(z.string().min(1)).max(100).optional(),
         name: z.string().min(1).max(200),
         brand: z.string().max(100),
         variant: z.string().max(200),
@@ -378,14 +424,17 @@ export const petRouter = createRouter({
       })
     )
     .mutation(async ({ input }) => {
-      if (input.petId) await requireActivePet(input.petId);
+      const { petIds, ...fields } = input;
+      const ids = petIds ?? (input.petId ? [input.petId] : []);
+      if (ids.length) await requireActivePets(ids);
       const now = new Date().toISOString();
       await getDb()
         .insert(supplies)
         .values({
-          ...input,
+          ...fields,
           id: randomUUID(),
-          petId: input.petId ?? null,
+          petId: ids[0] ?? null,
+          petIds: JSON.stringify(ids),
           photoAttachmentId: await persistImage(input.photo),
           produceDate: input.produceDate ?? null,
           shelfMonths: input.shelfMonths ?? null,
@@ -399,17 +448,23 @@ export const petRouter = createRouter({
       z.object({
         id: z.string().uuid(),
         petId: z.string().min(1).nullable().optional(),
+        petIds: z.array(z.string().min(1)).max(100).optional(),
         stock: z.enum(["plenty", "low", "empty"]).optional(),
         note: z.string().optional(),
       })
     )
     .mutation(async ({ input }) => {
-      if (input.petId) await requireActivePet(input.petId);
-      const { id, ...patch } = input;
+      const { id, petIds, petId, ...patch } = input;
+      const changesOwnership = petIds !== undefined || petId !== undefined;
+      const ids = petIds ?? (petId ? [petId] : []);
+      if (changesOwnership && ids.length) await requireActivePets(ids);
       await getDb()
         .update(supplies)
         .set({
           ...patch,
+          ...(changesOwnership
+            ? { petId: ids[0] ?? null, petIds: JSON.stringify(ids) }
+            : {}),
           updatedAt: new Date().toISOString(),
           modifiedByDeviceId: LOCAL_DEVICE_ID,
         })
@@ -456,6 +511,7 @@ export const petRouter = createRouter({
         records.map(async r => ({
           id: r.id,
           petId: r.petId,
+          petIds: parsePetIds(r.petIds, r.petId),
           type: r.type,
           title: r.title,
           note: r.note,
@@ -477,6 +533,7 @@ export const petRouter = createRouter({
         supplyRows.map(async s => ({
           id: s.id,
           petId: s.petId ?? undefined,
+          petIds: parsePetIds(s.petIds, s.petId ?? undefined),
           name: s.name,
           brand: s.brand,
           variant: s.variant,
@@ -538,12 +595,13 @@ export const petRouter = createRouter({
           )
         );
         const insertRecord = sqlite.prepare(`INSERT INTO pet_records
-        (id,petId,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,NULL)`);
+        (id,petId,petIds,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,NULL)`);
         backup.records.forEach((r, i) =>
           insertRecord.run(
             r.id,
             r.petId,
+            JSON.stringify(r.petIds ?? [r.petId]),
             r.type,
             r.title,
             r.note,
@@ -571,12 +629,13 @@ export const petRouter = createRouter({
           )
         );
         const insertSupply = sqlite.prepare(`INSERT INTO supplies
-        (id,petId,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`);
+        (id,petId,petIds,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,NULL)`);
         backup.supplies.forEach((s, i) =>
           insertSupply.run(
             s.id,
-            s.petId ?? null,
+            (s.petIds ?? (s.petId ? [s.petId] : []))[0] ?? null,
+            JSON.stringify(s.petIds ?? (s.petId ? [s.petId] : [])),
             s.name,
             s.brand,
             s.variant,

@@ -48,7 +48,8 @@ type PetRow = Omit<PetProfile, "avatar" | "archivedAt"> & {
   modifiedByDeviceId: string;
   deletedAt: string | null;
 };
-type RecordRow = Omit<PetRecord, "photo" | "value"> & {
+type RecordRow = Omit<PetRecord, "photo" | "value" | "petIds"> & {
+  petIds: string;
   value: number | null;
   photoAttachmentId: string | null;
   createdAt: string;
@@ -65,9 +66,10 @@ type PhotoRow = Omit<DailyPhoto, "photo"> & {
 };
 type SupplyRow = Omit<
   SupplyItem,
-  "petId" | "photo" | "produceDate" | "shelfMonths"
+  "petId" | "petIds" | "photo" | "produceDate" | "shelfMonths"
 > & {
   petId: string | null;
+  petIds: string;
   photoAttachmentId: string | null;
   produceDate: string | null;
   shelfMonths: number | null;
@@ -87,6 +89,23 @@ async function requirePet(id: string) {
   );
   if (!pet) throw new Error("请选择有效的宠物");
   return pet;
+}
+function parsePetIds(value: string | null | undefined, fallback?: string) {
+  if (value)
+    try {
+      const parsed = JSON.parse(value) as unknown;
+      if (Array.isArray(parsed) && parsed.every(id => typeof id === "string"))
+        return [...new Set(parsed)];
+    } catch {
+      /* use legacy association */
+    }
+  return fallback ? [fallback] : [];
+}
+async function requirePets(ids: string[]) {
+  const unique = [...new Set(ids)];
+  if (!unique.length) throw new Error("请至少选择一只宠物");
+  await Promise.all(unique.map(requirePet));
+  return unique;
 }
 async function pruneNativeAttachments() {
   const db = await getNativeDatabase();
@@ -201,10 +220,40 @@ export async function restoreNativePet(id: string) {
   await db.execute("UPDATE pet_profiles SET archivedAt=NULL WHERE id=$1", [id]);
 }
 export async function deleteNativePet(id: string) {
+  const database = await getNativeDatabase();
+  const records = await database.select<RecordRow[]>(
+    "SELECT * FROM pet_records"
+  );
+  const supplyRows = await database.select<SupplyRow[]>(
+    "SELECT * FROM supplies"
+  );
   await withTransaction(async db => {
-    await db.execute("DELETE FROM pet_records WHERE petId=$1", [id]);
+    for (const row of records) {
+      const current = parsePetIds(row.petIds, row.petId);
+      const remaining = current.filter(petId => petId !== id);
+      if (remaining.length === current.length) continue;
+      if (!remaining.length)
+        await db.execute("DELETE FROM pet_records WHERE id=$1", [row.id]);
+      else
+        await db.execute(
+          "UPDATE pet_records SET petId=$1,petIds=$2 WHERE id=$3",
+          [remaining[0], JSON.stringify(remaining), row.id]
+        );
+    }
     await db.execute("DELETE FROM daily_photos WHERE petId=$1", [id]);
-    await db.execute("DELETE FROM supplies WHERE petId=$1", [id]);
+    for (const row of supplyRows) {
+      const current = parsePetIds(row.petIds, row.petId ?? undefined);
+      const remaining = current.filter(petId => petId !== id);
+      if (remaining.length === current.length) continue;
+      if (!remaining.length)
+        await db.execute("DELETE FROM supplies WHERE id=$1", [row.id]);
+      else
+        await db.execute("UPDATE supplies SET petId=$1,petIds=$2 WHERE id=$3", [
+          remaining[0],
+          JSON.stringify(remaining),
+          row.id,
+        ]);
+    }
     await db.execute("DELETE FROM pet_profiles WHERE id=$1", [id]);
   });
   await pruneNativeAttachments();
@@ -251,35 +300,50 @@ export async function listNativeRecords(
 ): Promise<PetRecord[]> {
   const db = await getNativeDatabase();
   const rows = await db.select<RecordRow[]>(
-    `SELECT r.* FROM pet_records r JOIN pet_profiles p ON p.id=r.petId
-     WHERE r.deletedAt IS NULL AND p.deletedAt IS NULL ${includeArchived ? "" : "AND p.archivedAt IS NULL"}
-     ${petId ? "AND r.petId=$1" : ""} ORDER BY r.time DESC LIMIT 10000`,
-    petId ? [petId] : []
+    "SELECT * FROM pet_records WHERE deletedAt IS NULL ORDER BY time DESC LIMIT 10000"
   );
+  const activeIds = includeArchived
+    ? undefined
+    : new Set(
+        (
+          await db.select<Array<{ id: string }>>(
+            "SELECT id FROM pet_profiles WHERE archivedAt IS NULL AND deletedAt IS NULL"
+          )
+        ).map(row => row.id)
+      );
   return Promise.all(
-    rows.map(async r => ({
-      id: r.id,
-      petId: r.petId,
-      type: r.type,
-      title: r.title,
-      note: r.note,
-      time: r.time,
-      value: r.value ?? undefined,
-      photo: await getAttachmentData(r.photoAttachmentId),
-    }))
+    rows
+      .filter(r => {
+        const ids = parsePetIds(r.petIds, r.petId);
+        return petId
+          ? ids.includes(petId)
+          : !activeIds || ids.some(id => activeIds.has(id));
+      })
+      .map(async r => ({
+        id: r.id,
+        petId: r.petId,
+        petIds: parsePetIds(r.petIds, r.petId),
+        type: r.type,
+        title: r.title,
+        note: r.note,
+        time: r.time,
+        value: r.value ?? undefined,
+        photo: await getAttachmentData(r.photoAttachmentId),
+      }))
   );
 }
 export async function addNativeRecord(input: Omit<PetRecord, "id">) {
-  await requirePet(input.petId);
+  const ids = await requirePets(input.petIds ?? [input.petId]);
   const now = new Date().toISOString();
   await withTransaction(async db =>
     db.execute(
       `INSERT INTO pet_records
-    (id,petId,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
-    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL)`,
+    (id,petId,petIds,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt)
+    VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NULL)`,
       [
         crypto.randomUUID(),
-        input.petId,
+        ids[0],
+        JSON.stringify(ids),
         input.type,
         input.title,
         input.note,
@@ -365,40 +429,57 @@ export async function listNativeSupplies(
 ): Promise<SupplyItem[]> {
   const db = await getNativeDatabase();
   const rows = await db.select<SupplyRow[]>(
-    `SELECT s.* FROM supplies s LEFT JOIN pet_profiles p ON p.id=s.petId
-     WHERE s.deletedAt IS NULL ${includeArchived ? "" : "AND (s.petId IS NULL OR (p.deletedAt IS NULL AND p.archivedAt IS NULL))"}
-     ${petId ? "AND (s.petId IS NULL OR s.petId=$1)" : ""} ORDER BY s.updatedAt DESC LIMIT 2000`,
-    petId ? [petId] : []
+    "SELECT * FROM supplies WHERE deletedAt IS NULL ORDER BY updatedAt DESC LIMIT 2000"
   );
+  const activeIds = includeArchived
+    ? undefined
+    : new Set(
+        (
+          await db.select<Array<{ id: string }>>(
+            "SELECT id FROM pet_profiles WHERE archivedAt IS NULL AND deletedAt IS NULL"
+          )
+        ).map(row => row.id)
+      );
   return Promise.all(
-    rows.map(async s => ({
-      id: s.id,
-      petId: s.petId ?? undefined,
-      name: s.name,
-      brand: s.brand,
-      variant: s.variant,
-      category: s.category,
-      stock: s.stock,
-      photo: await getAttachmentData(s.photoAttachmentId),
-      produceDate: s.produceDate ?? undefined,
-      shelfMonths: s.shelfMonths ?? undefined,
-      note: s.note,
-      updatedAt: s.updatedAt,
-    }))
+    rows
+      .filter(s => {
+        const ids = parsePetIds(s.petIds, s.petId ?? undefined);
+        if (!ids.length) return true;
+        return petId
+          ? ids.includes(petId)
+          : !activeIds || ids.some(id => activeIds.has(id));
+      })
+      .map(async s => ({
+        id: s.id,
+        petId: s.petId ?? undefined,
+        petIds: parsePetIds(s.petIds, s.petId ?? undefined),
+        name: s.name,
+        brand: s.brand,
+        variant: s.variant,
+        category: s.category,
+        stock: s.stock,
+        photo: await getAttachmentData(s.photoAttachmentId),
+        produceDate: s.produceDate ?? undefined,
+        shelfMonths: s.shelfMonths ?? undefined,
+        note: s.note,
+        updatedAt: s.updatedAt,
+      }))
   );
 }
 export async function addNativeSupply(
   input: Omit<SupplyItem, "id" | "updatedAt">
 ) {
-  if (input.petId) await requirePet(input.petId);
+  const ids = input.petIds ?? (input.petId ? [input.petId] : []);
+  if (ids.length) await requirePets(ids);
   const now = new Date().toISOString();
   await withTransaction(async db =>
     db.execute(
       `INSERT INTO supplies
-  (id,petId,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL)`,
+  (id,petId,petIds,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULL)`,
       [
         crypto.randomUUID(),
-        input.petId ?? null,
+        ids[0] ?? null,
+        JSON.stringify(ids),
         input.name,
         input.brand,
         input.variant,
@@ -419,10 +500,20 @@ export async function updateNativeSupply(
   patch: Partial<SupplyItem>
 ) {
   const db = await getNativeDatabase();
+  const changesOwnership =
+    patch.petIds !== undefined || patch.petId !== undefined;
+  const ids = patch.petIds ?? (patch.petId ? [patch.petId] : []);
+  if (changesOwnership && ids.length) await requirePets(ids);
   await db.execute(
-    "UPDATE supplies SET petId=$1,stock=COALESCE($2,stock),note=COALESCE($3,note),updatedAt=$4,modifiedByDeviceId=$5 WHERE id=$6",
+    `UPDATE supplies SET
+      petId=CASE WHEN $1 THEN $2 ELSE petId END,
+      petIds=CASE WHEN $1 THEN $3 ELSE petIds END,
+      stock=COALESCE($4,stock),note=COALESCE($5,note),updatedAt=$6,modifiedByDeviceId=$7
+      WHERE id=$8`,
     [
-      patch.petId ?? null,
+      changesOwnership ? 1 : 0,
+      ids[0] ?? null,
+      JSON.stringify(ids),
       patch.stock ?? null,
       patch.note ?? null,
       new Date().toISOString(),
@@ -496,10 +587,11 @@ export async function importNativeBackup(value: unknown) {
       );
     for (const [i, r] of backup.records.entries())
       await db.execute(
-        `INSERT INTO pet_records (id,petId,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NULL)`,
+        `INSERT INTO pet_records (id,petId,petIds,type,title,note,time,value,photoAttachmentId,createdAt,updatedAt,modifiedByDeviceId,deletedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NULL)`,
         [
           r.id,
           r.petId,
+          JSON.stringify(r.petIds ?? [r.petId]),
           r.type,
           r.title,
           r.note,
@@ -527,10 +619,11 @@ export async function importNativeBackup(value: unknown) {
       );
     for (const [i, s] of backup.supplies.entries())
       await db.execute(
-        `INSERT INTO supplies (id,petId,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,NULL)`,
+        `INSERT INTO supplies (id,petId,petIds,name,brand,variant,category,stock,photoAttachmentId,produceDate,shelfMonths,note,updatedAt,modifiedByDeviceId,deletedAt) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULL)`,
         [
           s.id,
-          s.petId ?? null,
+          (s.petIds ?? (s.petId ? [s.petId] : []))[0] ?? null,
+          JSON.stringify(s.petIds ?? (s.petId ? [s.petId] : [])),
           s.name,
           s.brand,
           s.variant,

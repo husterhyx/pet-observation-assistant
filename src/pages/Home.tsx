@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   DndContext,
   PointerSensor,
@@ -53,6 +53,10 @@ import {
   Users,
   GripVertical,
   AlarmClock,
+  ChevronDown,
+  Check,
+  ChevronRight,
+  Sparkles,
 } from "lucide-react";
 import { usePetData, type HomeCardType } from "@/hooks/usePetData";
 import { parsePetBackupText } from "@contracts/backup";
@@ -63,6 +67,7 @@ import {
   STOCK_META,
   SUPPLY_CATEGORIES,
   expiryInfo,
+  supplyCategoryTracksStock,
   type PetProfile,
   type PetRecord,
   type PetSpecies,
@@ -151,6 +156,33 @@ function formatTime(value: string) {
   const d = new Date(value);
   return `${d.getMonth() + 1}月${d.getDate()}日 ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
+function petAgeText(birthday: string) {
+  if (!birthday) return "年龄待填写";
+  const born = new Date(`${birthday}T00:00:00`);
+  if (Number.isNaN(born.getTime())) return "年龄待填写";
+  const now = new Date();
+  const months = Math.max(
+    0,
+    (now.getFullYear() - born.getFullYear()) * 12 +
+      now.getMonth() -
+      born.getMonth() -
+      (now.getDate() < born.getDate() ? 1 : 0)
+  );
+  if (months < 12) return `${Math.max(1, months)} 个月大`;
+  const years = Math.floor(months / 12);
+  const rest = months % 12;
+  return rest ? `${years} 岁 ${rest} 个月` : `${years} 岁`;
+}
+function togetherText(homeDate: string) {
+  if (!homeDate) return "到家日待填写";
+  const arrived = new Date(`${homeDate}T00:00:00`);
+  if (Number.isNaN(arrived.getTime())) return "到家日待填写";
+  const days = Math.max(
+    0,
+    Math.floor((Date.now() - arrived.getTime()) / 86_400_000)
+  );
+  return `相伴第 ${days + 1} 天`;
+}
 function localDateTimeValue(date = new Date()) {
   const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return local.toISOString().slice(0, 16);
@@ -206,6 +238,10 @@ function MainApp() {
         {tab === "diary" && (
           <>
             <QuickPanel
+              key={
+                data.selectedPetId ??
+                `all:${data.activePets.map(p => p.id).join("|")}`
+              }
               data={data}
               onDetailed={openRecord}
               onEditCards={() => setCardsOpen(true)}
@@ -409,39 +445,128 @@ function QuickPanel({
   onDetailed: (t: RecordType) => void;
   onEditCards: () => void;
 }) {
-  const targetPet =
-    data.selectedPet ??
-    (data.activePets.length === 1 ? data.activePets[0] : undefined);
-  const species = targetPet?.species;
+  const species = data.selectedPet?.species;
+  const [quickPetIds, setQuickPetIds] = useState<string[]>(() =>
+    data.selectedPet ? [data.selectedPet.id] : data.activePets.map(p => p.id)
+  );
   const [done, setDone] = useState<RecordType>();
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState<{
+    text: string;
+    tone: "error" | "success";
+  }>();
+  const targetPets = data.selectedPet
+    ? [data.selectedPet]
+    : data.activePets.filter(p => quickPetIds.includes(p.id));
+  const allPetsSelected = quickPetIds.length === data.activePets.length;
+  const toggleQuickPet = (id: string) => {
+    setQuickPetIds(current =>
+      current.includes(id)
+        ? current.filter(item => item !== id)
+        : [...current, id]
+    );
+    setNotice(undefined);
+  };
   const quickRecord = async (type: RecordType) => {
-    if (!targetPet) {
-      setNotice("请先在上方选择要记录的宠物");
+    if (!targetPets.length) {
+      setNotice({ text: "请至少选择一只要打卡的宠物", tone: "error" });
       return;
     }
-    const meta = typeMeta(type, targetPet.species);
-    setNotice("");
-    await data.addRecord({
-      petId: targetPet.id,
-      type,
-      title: meta.label,
-      note: "",
-      time: new Date().toISOString(),
-    });
-    setDone(type);
-    window.setTimeout(
-      () => setDone(current => (current === type ? undefined : current)),
-      1200
-    );
+    setNotice(undefined);
+    const time = new Date().toISOString();
+    try {
+      const petIds = targetPets.map(pet => pet.id);
+      const species = new Set(targetPets.map(pet => pet.species));
+      await data.addRecord({
+        petId: petIds[0],
+        petIds,
+        type,
+        title:
+          type === "walk" && species.size > 1
+            ? "玩耍/遛狗"
+            : typeMeta(type, targetPets[0].species).label,
+        note: "",
+        time,
+      });
+      setDone(type);
+      if (!data.selectedPet) {
+        setNotice({
+          text: `已为 ${targetPets.length} 只宠物完成打卡`,
+          tone: "success",
+        });
+      }
+      window.setTimeout(
+        () => setDone(current => (current === type ? undefined : current)),
+        1200
+      );
+    } catch {
+      setNotice({ text: "打卡未完成，请稍后重试", tone: "error" });
+    }
   };
   return (
     <section className="px-5 mb-5">
       <div className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm">
-        <h2 className="text-xs text-[#264653]/50 flex gap-1 mb-2">
-          <Zap size={13} className="text-[#F4A261]" />
-          一键打卡
-        </h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-xs text-[#264653]/50 flex gap-1">
+            <Zap size={13} className="text-[#F4A261]" />
+            一键打卡
+          </h2>
+          {!data.selectedPet && (
+            <span className="text-[10px] text-[#2A7F83]">
+              已选 {quickPetIds.length}/{data.activePets.length}
+            </span>
+          )}
+        </div>
+        {!data.selectedPet && (
+          <div className="rounded-2xl bg-[#F5F0E1]/80 p-2.5 mb-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-[10px] font-semibold text-[#264653]/55">
+                选择打卡对象
+              </span>
+              <button
+                onClick={() => {
+                  setQuickPetIds(
+                    allPetsSelected ? [] : data.activePets.map(p => p.id)
+                  );
+                  setNotice(undefined);
+                }}
+                className="text-[10px] font-semibold text-[#C76E2B] px-1"
+              >
+                {allPetsSelected ? "取消全选" : "全部选择"}
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {data.activePets.map(p => {
+                const chosen = quickPetIds.includes(p.id);
+                return (
+                  <button
+                    key={p.id}
+                    aria-pressed={chosen}
+                    onClick={() => toggleQuickPet(p.id)}
+                    className={`rounded-full pl-1 pr-2.5 py-1 flex items-center gap-1.5 text-[11px] font-medium border transition active:scale-95 ${
+                      chosen
+                        ? "bg-[#FFFDF6] border-[#F4A261]/55 text-[#264653] shadow-sm"
+                        : "bg-transparent border-[#264653]/10 text-[#264653]/40"
+                    }`}
+                  >
+                    <span className={chosen ? "opacity-100" : "opacity-45"}>
+                      <Avatar pet={p} />
+                    </span>
+                    {p.name}
+                    <span
+                      className={`w-4 h-4 rounded-full grid place-items-center ${
+                        chosen
+                          ? "bg-[#F4A261] text-white"
+                          : "border border-[#264653]/20"
+                      }`}
+                    >
+                      {chosen && <Check size={10} strokeWidth={3} />}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
         <div className="grid grid-cols-4 gap-2">
           {QUICK.map(t => {
             const I = ICONS[t];
@@ -452,51 +577,64 @@ function QuickPanel({
                 className={`rounded-2xl py-2.5 flex flex-col items-center text-xs gap-1 ${done === t ? "bg-[#F4A261] text-white" : COLORS[t]}`}
               >
                 <I size={20} />
-                {done === t ? "已记下✓" : typeMeta(t, species).label}
+                {done === t
+                  ? "已记下✓"
+                  : t === "walk" && !data.selectedPet
+                    ? "玩耍/遛狗"
+                    : typeMeta(t, species).label}
               </button>
             );
           })}
         </div>
         {notice && (
-          <p className="mt-2 text-center text-xs text-[#C0452B]">{notice}</p>
+          <p
+            className={`mt-2 text-center text-xs ${notice.tone === "success" ? "text-[#2A7F83]" : "text-[#C0452B]"}`}
+          >
+            {notice.text}
+          </p>
         )}
-        <div className="border-t border-[#264653]/8 mt-3 pt-3">
-          <div className="flex justify-between mb-2">
-            <span className="text-xs text-[#264653]/50">健康与成长</span>
-            {data.selectedPet && (
+        {data.selectedPet && (
+          <div className="border-t border-[#264653]/8 mt-4 pt-4">
+            <div className="flex items-center justify-between mb-3">
+              <div>
+                <span className="font-semibold text-sm flex items-center gap-1.5">
+                  <Sparkles size={15} className="text-[#E9A23B]" />
+                  健康与成长
+                </span>
+                <p className="text-[10px] text-[#264653]/40 mt-0.5">
+                  常用健康记录，轻触即可添加
+                </p>
+              </div>
               <button
                 onClick={onEditCards}
-                className="text-[11px] text-[#C76E2B] flex gap-1"
+                className="rounded-full bg-[#F4A261]/12 px-2.5 py-1.5 text-[11px] font-semibold text-[#C76E2B] flex items-center gap-1 active:scale-95 transition"
               >
                 <SlidersHorizontal size={12} />
-                编辑同物种卡片
+                编辑
               </button>
-            )}
-          </div>
-          {data.selectedPet ? (
+            </div>
             <div className="grid grid-cols-3 gap-2">
               {data.homeCardTypes.map(t => {
                 const I = ICONS[t];
+                const label = typeMeta(t, species).label;
                 return (
                   <button
                     key={t}
                     onClick={() => onDetailed(t)}
-                    className="rounded-2xl bg-[#F5F0E1] py-2 text-xs flex justify-center gap-1"
+                    className="min-w-0 rounded-2xl bg-[#F5F0E1]/90 px-2 py-2.5 flex items-center justify-center gap-1.5 border border-transparent active:border-[#F4A261]/45 active:scale-95 transition"
                   >
-                    <I size={15} />
-                    {t === "walk" && species === "cat"
-                      ? "活动时长"
-                      : typeMeta(t, species).label}
+                    <span className={`shrink-0 !bg-transparent ${COLORS[t]}`}>
+                      <I size={15} />
+                    </span>
+                    <span className="min-w-0 text-[11px] font-medium text-[#264653]/70 truncate">
+                      {label}
+                    </span>
                   </button>
                 );
               })}
             </div>
-          ) : (
-            <p className="text-xs text-center text-[#264653]/40 py-2">
-              选择一只宠物后显示它的专属卡片
-            </p>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </section>
   );
@@ -520,7 +658,10 @@ function Timeline({
   return (
     <div className="px-5 space-y-3">
       {records.map(r => {
-        const p = petById(pets, r.petId);
+        const linkedPets = r.petIds
+          .map(id => petById(pets, id))
+          .filter((pet): pet is PetProfile => Boolean(pet));
+        const p = linkedPets[0];
         const I = ICONS[r.type];
         const meta = typeMeta(r.type, p?.species);
         return (
@@ -536,7 +677,7 @@ function Timeline({
             <div className="min-w-0 flex-1">
               <div className="flex justify-between gap-2">
                 <h3 className="font-semibold">
-                  {meta.label}
+                  {r.title || meta.label}
                   {r.value != null && (
                     <b className="text-[#F4A261] ml-2">
                       {r.value}
@@ -548,8 +689,10 @@ function Timeline({
                   {formatTime(r.time)}
                 </span>
               </div>
-              {p && (
-                <p className="text-[11px] text-[#2A7F83] mt-0.5">{p.name}</p>
+              {linkedPets.length > 0 && (
+                <p className="text-[11px] text-[#2A7F83] mt-0.5">
+                  {linkedPets.map(pet => pet.name).join("、")}
+                </p>
               )}
               {r.note && (
                 <p className="text-sm mt-1 whitespace-pre-wrap">{r.note}</p>
@@ -586,22 +729,32 @@ function RecordSheet({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [petId, setPetId] = useState(data.selectedPetId ?? "");
+  const [petIds, setPetIds] = useState<string[]>(() =>
+    data.selectedPetId ? [data.selectedPetId] : data.activePets.map(p => p.id)
+  );
   const [type, setType] = useState(initialType);
   const [note, setNote] = useState("");
   const [value, setValue] = useState("");
   const [time, setTime] = useState(() => localDateTimeValue());
   const [photo, setPhoto] = useState<string>();
   const [saving, setSaving] = useState(false);
-  const p = petById(data.activePets, petId);
+  const selectedPets = petIds
+    .map(id => petById(data.activePets, id))
+    .filter((pet): pet is PetProfile => Boolean(pet));
+  const p = selectedPets[0];
   const meta = typeMeta(type, p?.species);
   const submit = async () => {
-    if (!petId) return;
+    if (!petIds.length) return;
     setSaving(true);
     await data.addRecord({
-      petId,
+      petId: petIds[0],
+      petIds,
       type,
-      title: meta.label,
+      title:
+        type === "walk" &&
+        new Set(selectedPets.map(pet => pet.species)).size > 1
+          ? "玩耍/遛狗"
+          : meta.label,
       note: note.trim(),
       time: new Date(time).toISOString(),
       value: meta.unit && value ? Number(value) : undefined,
@@ -611,7 +764,12 @@ function RecordSheet({
   };
   return (
     <Sheet onClose={onClose} title="记一笔">
-      <PetSelect pets={data.activePets} value={petId} onChange={setPetId} />
+      <PetMultiSelect
+        pets={data.activePets}
+        value={petIds}
+        onChange={setPetIds}
+        label="记录对象"
+      />
       <div className="space-y-3 mt-4">
         {RECORD_GROUPS.map(g => (
           <div key={g.name}>
@@ -626,7 +784,10 @@ function RecordSheet({
                     className={`rounded-xl py-2 flex flex-col items-center text-[11px] ${type === t ? "bg-[#F4A261] text-white" : "bg-[#F5F0E1]"}`}
                   >
                     <I size={17} />
-                    {typeMeta(t, p?.species).label}
+                    {t === "walk" &&
+                    new Set(selectedPets.map(pet => pet.species)).size > 1
+                      ? "玩耍/遛狗"
+                      : typeMeta(t, p?.species).label}
                   </button>
                 );
               })}
@@ -661,14 +822,16 @@ function RecordSheet({
         />
         <ImagePicker value={photo} onChange={setPhoto} />
         <button
-          disabled={!petId || saving}
+          disabled={!petIds.length || saving}
           onClick={() => void submit()}
           className="primary"
         >
           {saving ? "保存中…" : "保存"}
         </button>
-        {!petId && (
-          <p className="text-xs text-[#C0452B] text-center">请先选择宠物</p>
+        {!petIds.length && (
+          <p className="text-xs text-[#C0452B] text-center">
+            请至少选择一只宠物
+          </p>
         )}
       </div>
     </Sheet>
@@ -688,19 +851,163 @@ function PetSelect({
   return (
     <label className="block text-xs text-[#264653]/55">
       归属
-      <select
+      <StyledSelect
         value={value}
-        onChange={e => onChange(e.target.value)}
-        className="field mt-1"
-      >
-        <option value="">{allowShared ? "全家共用" : "请选择宠物"}</option>
-        {pets.map(p => (
-          <option key={p.id} value={p.id}>
-            {p.name}（{speciesText(p.species)}）
-          </option>
-        ))}
-      </select>
+        onChange={onChange}
+        placeholder={allowShared ? "全家共用" : "请选择宠物"}
+        options={[
+          { value: "", label: allowShared ? "全家共用" : "请选择宠物" },
+          ...pets.map(p => ({
+            value: p.id,
+            label: `${p.name}（${speciesText(p.species)}）`,
+          })),
+        ]}
+        className="mt-1"
+      />
     </label>
+  );
+}
+function PetMultiSelect({
+  pets,
+  value,
+  onChange,
+  label = "归属",
+  allowShared = false,
+}: {
+  pets: PetProfile[];
+  value: string[];
+  onChange: (value: string[]) => void;
+  label?: string;
+  allowShared?: boolean;
+}) {
+  const toggle = (id: string) =>
+    onChange(
+      value.includes(id) ? value.filter(item => item !== id) : [...value, id]
+    );
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <span className="text-xs text-[#264653]/55">{label}</span>
+        {!allowShared && (
+          <button
+            type="button"
+            onClick={() =>
+              onChange(value.length === pets.length ? [] : pets.map(p => p.id))
+            }
+            className="text-[10px] font-semibold text-[#C76E2B]"
+          >
+            {value.length === pets.length ? "取消全选" : "全部选择"}
+          </button>
+        )}
+      </div>
+      <div className="rounded-2xl bg-[#F5F0E1]/80 p-2 flex flex-wrap gap-2">
+        {allowShared && (
+          <button
+            type="button"
+            aria-pressed={!value.length}
+            onClick={() => onChange([])}
+            className={`rounded-full px-3 py-2 text-[11px] font-medium border transition ${
+              !value.length
+                ? "bg-[#264653] border-[#264653] text-white"
+                : "bg-[#FFFDF6] border-transparent text-[#264653]/50"
+            }`}
+          >
+            全家共用
+          </button>
+        )}
+        {pets.map(pet => {
+          const selected = value.includes(pet.id);
+          return (
+            <button
+              type="button"
+              key={pet.id}
+              aria-pressed={selected}
+              onClick={() => toggle(pet.id)}
+              className={`rounded-full pl-1 pr-2.5 py-1 flex items-center gap-1.5 text-[11px] font-medium border transition active:scale-95 ${
+                selected
+                  ? "bg-[#FFFDF6] border-[#F4A261]/55 text-[#264653] shadow-sm"
+                  : "bg-transparent border-[#264653]/10 text-[#264653]/40"
+              }`}
+            >
+              <span className={selected ? "opacity-100" : "opacity-45"}>
+                <Avatar pet={pet} />
+              </span>
+              {pet.name}
+              <span
+                className={`w-4 h-4 rounded-full grid place-items-center ${
+                  selected
+                    ? "bg-[#F4A261] text-white"
+                    : "border border-[#264653]/20"
+                }`}
+              >
+                {selected && <Check size={10} strokeWidth={3} />}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+function StyledSelect<T extends string>({
+  value,
+  onChange,
+  options,
+  placeholder,
+  className = "",
+}: {
+  value: T;
+  onChange: (value: T) => void;
+  options: Array<{ value: T; label: string }>;
+  placeholder: string;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const selected = options.find(option => option.value === value);
+  useEffect(() => {
+    if (!open) return;
+    const close = (event: PointerEvent) => {
+      if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    return () => document.removeEventListener("pointerdown", close);
+  }, [open]);
+  return (
+    <div ref={rootRef} className={`relative ${className}`}>
+      <button
+        type="button"
+        onClick={() => setOpen(current => !current)}
+        aria-expanded={open}
+        className={`field flex items-center justify-between gap-3 text-left ${open ? "ring-2 ring-[#F4A261]/45" : ""}`}
+      >
+        <span className={selected ? "text-[#264653]" : "text-[#264653]/45"}>
+          {selected?.label ?? placeholder}
+        </span>
+        <ChevronDown
+          size={17}
+          className={`shrink-0 text-[#264653]/45 transition-transform ${open ? "rotate-180" : ""}`}
+        />
+      </button>
+      {open && (
+        <div className="absolute left-0 right-0 top-[calc(100%+0.35rem)] z-50 overflow-hidden rounded-2xl border border-[#264653]/10 bg-[#FFFDF6] p-1.5 shadow-xl shadow-[#264653]/15">
+          {options.map(option => (
+            <button
+              type="button"
+              key={option.value || "empty"}
+              onClick={() => {
+                onChange(option.value);
+                setOpen(false);
+              }}
+              className={`flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-left text-sm transition ${option.value === value ? "bg-[#F4A261] text-white font-semibold" : "text-[#264653]/75 hover:bg-[#F5F0E1]"}`}
+            >
+              <span className="truncate">{option.label}</span>
+              {option.value === value && <Check size={15} />}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 function ImagePicker({
@@ -944,7 +1251,9 @@ function SupplyCard({
   onStock: (stock: StockLevel) => unknown;
   onDelete: () => unknown;
 }) {
-  const owner = supply.petId ? petById(pets, supply.petId) : undefined;
+  const owners = supply.petIds
+    .map(id => petById(pets, id))
+    .filter((pet): pet is PetProfile => Boolean(pet));
   const expiry = expiryInfo(supply);
   return (
     <article className="bg-[#FFFDF6] rounded-3xl p-4 shadow-sm shadow-[#264653]/5">
@@ -982,7 +1291,10 @@ function SupplyCard({
             <p className="text-xs text-[#264653]/55 mt-0.5">{supply.variant}</p>
           )}
           <p className="text-xs text-[#264653]/45 mt-1">
-            {owner ? `${owner.name}专属` : "全家共用"} · {supply.category}
+            {owners.length
+              ? `${owners.map(owner => owner.name).join("、")}使用`
+              : "全家共用"}{" "}
+            · {supply.category}
           </p>
           {expiry && (
             <p
@@ -998,22 +1310,26 @@ function SupplyCard({
           )}
         </div>
       </div>
-      <div className="grid grid-cols-3 gap-2 mt-3">
-        {(Object.keys(STOCK_META) as StockLevel[]).map(level => (
-          <button
-            key={level}
-            onClick={() => onStock(level)}
-            className={`text-xs px-3 py-2 rounded-full transition active:scale-95 ${supply.stock === level ? `${STOCK_META[level].cls} font-semibold ring-1 ring-current/15` : "bg-[#F5F0E1] text-[#264653]/45"}`}
-          >
-            {STOCK_META[level].label}
-          </button>
-        ))}
-      </div>
+      {supplyCategoryTracksStock(supply.category) && (
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          {(Object.keys(STOCK_META) as StockLevel[]).map(level => (
+            <button
+              key={level}
+              onClick={() => onStock(level)}
+              className={`text-xs px-3 py-2 rounded-full transition active:scale-95 ${supply.stock === level ? `${STOCK_META[level].cls} font-semibold ring-1 ring-current/15` : "bg-[#F5F0E1] text-[#264653]/45"}`}
+            >
+              {STOCK_META[level].label}
+            </button>
+          ))}
+        </div>
+      )}
     </article>
   );
 }
 function SupplySheet({ data, onClose }: { data: Data; onClose: () => void }) {
-  const [petId, setPetId] = useState(data.selectedPetId ?? "");
+  const [petIds, setPetIds] = useState<string[]>(() =>
+    data.selectedPetId ? [data.selectedPetId] : []
+  );
   const [name, setName] = useState("");
   const [brand, setBrand] = useState("");
   const [variant, setVariant] = useState("");
@@ -1036,7 +1352,8 @@ function SupplySheet({ data, onClose }: { data: Data; onClose: () => void }) {
     if (!name.trim() || saving) return;
     setSaving(true);
     await data.addSupply({
-      petId: petId || undefined,
+      petId: petIds[0],
+      petIds,
       name: name.trim(),
       brand: brand.trim(),
       variant: variant.trim(),
@@ -1084,10 +1401,10 @@ function SupplySheet({ data, onClose }: { data: Data; onClose: () => void }) {
             }}
           />
         </div>
-        <PetSelect
+        <PetMultiSelect
           pets={data.activePets}
-          value={petId}
-          onChange={setPetId}
+          value={petIds}
+          onChange={setPetIds}
           allowShared
         />
         <label className="block">
@@ -1163,21 +1480,23 @@ function SupplySheet({ data, onClose }: { data: Data; onClose: () => void }) {
             {expiryPreview}
           </p>
         )}
-        <div>
-          <span className="text-xs text-[#264653]/50">当前余量</span>
-          <div className="grid grid-cols-3 gap-2 mt-1">
-            {(Object.keys(STOCK_META) as StockLevel[]).map(level => (
-              <button
-                type="button"
-                key={level}
-                onClick={() => setStock(level)}
-                className={`rounded-2xl py-2 text-sm transition ${stock === level ? "bg-[#F4A261] text-white font-semibold" : "bg-[#F5F0E1] text-[#264653]/70"}`}
-              >
-                {STOCK_META[level].label}
-              </button>
-            ))}
+        {supplyCategoryTracksStock(category) && (
+          <div>
+            <span className="text-xs text-[#264653]/50">当前余量</span>
+            <div className="grid grid-cols-3 gap-2 mt-1">
+              {(Object.keys(STOCK_META) as StockLevel[]).map(level => (
+                <button
+                  type="button"
+                  key={level}
+                  onClick={() => setStock(level)}
+                  className={`rounded-2xl py-2 text-sm transition ${stock === level ? "bg-[#F4A261] text-white font-semibold" : "bg-[#F5F0E1] text-[#264653]/70"}`}
+                >
+                  {STOCK_META[level].label}
+                </button>
+              ))}
+            </div>
           </div>
-        </div>
+        )}
         <label className="block">
           <span className="text-xs text-[#264653]/50">备注</span>
           <input
@@ -1207,7 +1526,7 @@ function Me({
   onRecord: (t: RecordType) => void;
 }) {
   return (
-    <div className="space-y-6">
+    <div className="space-y-7 pb-2">
       <PetManager data={data} />
       <Stats
         records={data.records}
@@ -1224,57 +1543,111 @@ function PetManager({ data }: { data: Data }) {
   const archived = data.pets.filter(p => p.archivedAt);
   return (
     <section className="px-5">
-      <div className="flex justify-between mb-3">
-        <h2 className="text-lg font-bold">宠物管理</h2>
+      <div className="flex justify-between items-end mb-3">
+        <div>
+          <p className="text-[11px] font-semibold tracking-[.18em] text-[#F4A261]">
+            FAMILY PROFILE
+          </p>
+          <h2 className="text-lg font-bold mt-0.5">我的毛孩子</h2>
+          <p className="text-xs text-[#264653]/45 mt-0.5">
+            {data.activePets.length} 位家庭成员
+          </p>
+        </div>
         <button
           onClick={() => setEditing("new")}
-          className="text-sm text-[#C76E2B] flex gap-1"
+          className="rounded-full bg-[#F4A261] text-white pl-3 pr-3.5 py-2 text-xs font-semibold flex items-center gap-1 shadow-sm active:scale-95 transition"
         >
           <Plus size={16} />
-          添加宠物
+          添加
         </button>
       </div>
       <div className="space-y-3">
-        {data.activePets.map(p => (
-          <article
-            key={p.id}
-            className="bg-[#FFFDF6] rounded-3xl p-4 flex gap-3 items-center"
-          >
-            <Avatar pet={p} size="lg" />
-            <div className="flex-1">
-              <h3 className="font-bold">{p.name}</h3>
-              <p className="text-xs text-[#264653]/50">
-                {speciesText(p.species)} · {p.breed || "品种待填写"}
-              </p>
-            </div>
-            <button onClick={() => setEditing(p)}>
-              <Pencil size={17} />
-            </button>
-            <button
-              onClick={() => {
-                if (confirm(`归档 ${p.name}？历史数据会保留。`))
-                  void data.archivePet(p.id);
-              }}
+        {data.activePets.map(p => {
+          const recordCount = data.records.filter(r =>
+            r.petIds.includes(p.id)
+          ).length;
+          return (
+            <article
+              key={p.id}
+              className="relative overflow-hidden bg-[#FFFDF6] rounded-[1.75rem] p-4 shadow-sm border border-white"
             >
-              <Archive size={17} />
-            </button>
-          </article>
-        ))}
+              <span className="absolute -right-8 -top-10 w-28 h-28 rounded-full bg-[#A8DADC]/20" />
+              <div className="relative flex gap-3 items-center">
+                <span className="p-1 rounded-full bg-white shadow-sm">
+                  <Avatar pet={p} size="lg" />
+                </span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-lg truncate">{p.name}</h3>
+                    <span className="rounded-full bg-[#F5F0E1] px-2 py-0.5 text-[10px] text-[#264653]/55">
+                      {speciesText(p.species)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-[#264653]/50 mt-0.5 truncate">
+                    {p.breed || "品种待填写"} ·{" "}
+                    {p.gender === "girl" ? "妹妹" : "弟弟"}
+                  </p>
+                </div>
+                <button
+                  onClick={() => setEditing(p)}
+                  aria-label={`编辑${p.name}`}
+                  className="rounded-full bg-[#F4A261]/12 text-[#C76E2B] px-2.5 py-1.5 text-xs font-semibold flex items-center gap-1"
+                >
+                  <Pencil size={13} />
+                  编辑
+                </button>
+              </div>
+              <div className="relative grid grid-cols-3 gap-2 mt-4 pt-3 border-t border-[#264653]/8">
+                <div>
+                  <b className="block text-xs">{petAgeText(p.birthday)}</b>
+                  <span className="text-[9px] text-[#264653]/40">成长时光</span>
+                </div>
+                <div>
+                  <b className="block text-xs">{togetherText(p.homeDate)}</b>
+                  <span className="text-[9px] text-[#264653]/40">陪伴日记</span>
+                </div>
+                <div className="text-right">
+                  <b className="block text-xs">{recordCount} 条</b>
+                  <span className="text-[9px] text-[#264653]/40">生活记录</span>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  if (confirm(`归档 ${p.name}？历史数据会保留。`))
+                    void data.archivePet(p.id);
+                }}
+                className="relative mt-3 text-[10px] text-[#264653]/38 flex items-center gap-1 ml-auto"
+              >
+                <Archive size={12} />
+                归档这位成员
+              </button>
+            </article>
+          );
+        })}
         {archived.length > 0 && (
-          <div>
-            <p className="text-xs text-[#264653]/45 my-2">已归档</p>
+          <div className="rounded-3xl bg-[#264653]/5 p-3">
+            <p className="text-xs font-semibold text-[#264653]/55 mb-2 flex items-center gap-1.5">
+              <Archive size={13} /> 已归档成员
+            </p>
             {archived.map(p => (
               <div
                 key={p.id}
-                className="bg-white/60 rounded-2xl p-3 flex justify-between mb-2"
+                className="bg-[#FFFDF6]/80 rounded-2xl p-3 flex items-center justify-between mb-2 last:mb-0"
               >
-                <span>{p.name}</span>
-                <span className="flex gap-3">
-                  <button onClick={() => data.restorePet(p.id)}>
+                <span className="flex items-center gap-2 text-sm font-semibold">
+                  <Avatar pet={p} /> {p.name}
+                </span>
+                <span className="flex gap-2">
+                  <button
+                    aria-label={`恢复${p.name}`}
+                    className="w-8 h-8 rounded-full bg-[#A8DADC]/30 grid place-items-center text-[#2A7F83]"
+                    onClick={() => data.restorePet(p.id)}
+                  >
                     <ArchiveRestore size={17} />
                   </button>
                   <button
-                    className="text-[#C0452B]"
+                    aria-label={`永久删除${p.name}`}
+                    className="w-8 h-8 rounded-full bg-[#E76F51]/10 grid place-items-center text-[#C0452B]"
                     onClick={() => {
                       if (
                         confirm(
@@ -1385,33 +1758,25 @@ function PetForm({
           </label>
         </div>
         <div className="grid grid-cols-2 gap-2">
-          <select
+          <StyledSelect<"boy" | "girl">
             value={draft.gender}
-            onChange={e =>
-              setDraft(d => ({
-                ...d,
-                gender: e.target.value as "boy" | "girl",
-              }))
-            }
-            className="field"
-          >
-            <option value="boy">弟弟</option>
-            <option value="girl">妹妹</option>
-          </select>
-          <select
+            onChange={gender => setDraft(d => ({ ...d, gender }))}
+            placeholder="选择性别"
+            options={[
+              { value: "boy", label: "弟弟" },
+              { value: "girl", label: "妹妹" },
+            ]}
+          />
+          <StyledSelect<"" | "yes" | "no">
             value={draft.neutered}
-            onChange={e =>
-              setDraft(d => ({
-                ...d,
-                neutered: e.target.value as "" | "yes" | "no",
-              }))
-            }
-            className="field"
-          >
-            <option value="">绝育情况未知</option>
-            <option value="yes">已绝育</option>
-            <option value="no">未绝育</option>
-          </select>
+            onChange={neutered => setDraft(d => ({ ...d, neutered }))}
+            placeholder="绝育情况"
+            options={[
+              { value: "", label: "绝育情况未知" },
+              { value: "yes", label: "已绝育" },
+              { value: "no", label: "未绝育" },
+            ]}
+          />
         </div>
         <ImagePicker
           value={draft.avatar}
@@ -1455,31 +1820,71 @@ function Stats({
   const weightGroups = (selectedPet ? [selectedPet] : pets).map(p => ({
     pet: p,
     rows: records
-      .filter(r => r.petId === p.id && r.type === "weight" && r.value != null)
+      .filter(
+        r => r.petIds.includes(p.id) && r.type === "weight" && r.value != null
+      )
       .slice(0, 20)
       .reverse(),
   }));
   return (
     <section className="px-5">
-      <h2 className="font-bold mb-3">统计</h2>
+      <div className="flex items-end justify-between mb-3">
+        <div>
+          <p className="text-[11px] font-semibold tracking-[.18em] text-[#2A7F83]">
+            LIFE OVERVIEW
+          </p>
+          <h2 className="text-lg font-bold mt-0.5">生活统计</h2>
+        </div>
+        <span className="text-[10px] rounded-full bg-[#A8DADC]/25 text-[#2A7F83] px-2.5 py-1">
+          {selectedPet ? selectedPet.name : "全家汇总"}
+        </span>
+      </div>
       <div className="grid grid-cols-2 gap-3">
-        {cards.map(([label, value, type]) => {
+        {cards.map(([label, value, type], index) => {
           const I = ICONS[type];
           return (
             <button
               key={label}
               onClick={() => onRecord(type)}
-              className="bg-[#FFFDF6] rounded-3xl p-4 text-left"
+              className="relative overflow-hidden bg-[#FFFDF6] rounded-3xl p-4 text-left shadow-sm border border-white active:scale-[.98] transition"
             >
-              <I size={18} />
-              <b className="block text-xl mt-2">{value}</b>
-              <span className="text-xs text-[#264653]/50">{label}</span>
+              <span
+                className={`w-9 h-9 rounded-2xl grid place-items-center ${COLORS[type]}`}
+              >
+                <I size={18} />
+              </span>
+              <b className="block text-xl mt-3 tracking-tight">{value}</b>
+              <span className="text-xs text-[#264653]/50 mt-0.5 block">
+                {label}
+              </span>
+              <ChevronRight
+                size={14}
+                className={`absolute right-3 top-4 ${index % 2 ? "text-[#2A7F83]/30" : "text-[#F4A261]/35"}`}
+              />
             </button>
           );
         })}
       </div>
-      <div className="bg-[#FFFDF6] rounded-3xl p-4 mt-3">
-        <h3 className="font-bold">体重趋势</h3>
+      <div className="bg-[#FFFDF6] rounded-3xl p-4 mt-3 shadow-sm border border-white">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <h3 className="font-bold flex items-center gap-2">
+              <span className="w-8 h-8 rounded-xl bg-[#E9C46A]/20 text-[#9A7B1E] grid place-items-center">
+                <Scale size={16} />
+              </span>
+              体重趋势
+            </h3>
+            <p className="text-[10px] text-[#264653]/40 mt-1 ml-10">
+              每位宠物独立记录
+            </p>
+          </div>
+          <button
+            onClick={() => onRecord("weight")}
+            className="rounded-full bg-[#F4A261]/12 text-[#C76E2B] px-2.5 py-1.5 text-[10px] font-semibold shrink-0"
+          >
+            记录体重
+          </button>
+        </div>
         {weightGroups.map(g => (
           <div key={g.pet.id} className="mt-3">
             <p className="text-xs font-semibold">{g.pet.name}</p>
@@ -1535,22 +1940,42 @@ function CardsEditor({ data, onClose }: { data: Data; onClose: () => void }) {
       )
     );
   };
+  const available = HOME_OPTIONS.filter(type => !draft.includes(type));
   return (
     <Sheet title={`编辑${speciesText(species)}主页卡片`} onClose={onClose}>
-      <p className="text-xs text-[#264653]/50 mt-2">
-        此排序会应用到所有{speciesText(species)}。
-      </p>
+      <div className="relative overflow-hidden rounded-3xl bg-[#F5F0E1] p-4 mt-4">
+        <span className="absolute -right-5 -top-8 w-24 h-24 rounded-full bg-[#A8DADC]/25" />
+        <div className="relative flex items-center gap-3">
+          <span className="w-11 h-11 rounded-2xl bg-[#FFFDF6] grid place-items-center text-[#F4A261] shadow-sm">
+            <SlidersHorizontal size={21} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="font-semibold text-sm">定制常用健康入口</h3>
+            <p className="text-[10px] text-[#264653]/45 mt-0.5">
+              长按拖动排序，设置会同步到所有{speciesText(species)}
+            </p>
+          </div>
+          <span className="rounded-full bg-[#FFFDF6] px-2.5 py-1 text-[10px] font-semibold text-[#2A7F83]">
+            {draft.length} 项
+          </span>
+        </div>
+      </div>
+      <div className="flex items-center justify-between mt-5 mb-2">
+        <h3 className="text-sm font-bold">主页显示</h3>
+        <span className="text-[10px] text-[#264653]/40">按住左侧手柄拖动</span>
+      </div>
       <DndContext
         sensors={sensors}
         collisionDetection={closestCenter}
         onDragEnd={handleDragEnd}
       >
         <SortableContext items={draft} strategy={verticalListSortingStrategy}>
-          <div className="space-y-2 mt-4">
-            {draft.map(type => (
+          <div className="space-y-2">
+            {draft.map((type, index) => (
               <SortableCard
                 key={type}
                 type={type}
+                index={index}
                 species={species}
                 onRemove={() => setDraft(v => v.filter(item => item !== type))}
               />
@@ -1558,37 +1983,60 @@ function CardsEditor({ data, onClose }: { data: Data; onClose: () => void }) {
           </div>
         </SortableContext>
       </DndContext>
-      <select
-        value=""
-        onChange={e => {
-          if (e.target.value)
-            setDraft(v => [...v, e.target.value as HomeCardType]);
-        }}
-        className="field mt-3"
-      >
-        <option value="">添加卡片……</option>
-        {HOME_OPTIONS.filter(t => !draft.includes(t)).map(t => (
-          <option key={t} value={t}>
-            {typeMeta(t, species).label}
-          </option>
-        ))}
-      </select>
+      <div className="mt-5">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="text-sm font-bold">添加其他卡片</h3>
+          <span className="text-[10px] text-[#264653]/40">
+            还可添加 {available.length} 项
+          </span>
+        </div>
+        {available.length ? (
+          <div className="grid grid-cols-2 gap-2">
+            {available.map(type => {
+              const I = ICONS[type];
+              return (
+                <button
+                  key={type}
+                  onClick={() => setDraft(current => [...current, type])}
+                  className="rounded-2xl bg-[#F5F0E1]/85 p-2.5 flex items-center gap-2 text-left active:scale-[.98] transition"
+                >
+                  <span
+                    className={`w-8 h-8 rounded-xl grid place-items-center shrink-0 ${COLORS[type]}`}
+                  >
+                    <I size={16} />
+                  </span>
+                  <span className="text-xs font-semibold flex-1 truncate">
+                    {typeMeta(type, species).label}
+                  </span>
+                  <Plus size={14} className="text-[#264653]/40" />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="rounded-2xl bg-[#A8DADC]/20 text-[#2A7F83] p-3 text-xs text-center">
+            所有卡片都已添加到主页
+          </div>
+        )}
+      </div>
       <button
         disabled={!draft.length}
         onClick={() => void data.setHomeCards(species, draft).then(onClose)}
-        className="primary mt-3"
+        className="primary mt-5"
       >
-        保存设置
+        保存主页设置
       </button>
     </Sheet>
   );
 }
 function SortableCard({
   type,
+  index,
   species,
   onRemove,
 }: {
   type: HomeCardType;
+  index: number;
   species: PetSpecies;
   onRemove: () => void;
 }) {
@@ -1604,20 +2052,36 @@ function SortableCard({
     <div
       ref={setNodeRef}
       style={{ transform: CSS.Transform.toString(transform), transition }}
-      className={`secondary flex justify-between ${isDragging ? "shadow-lg opacity-90" : ""}`}
+      className={`rounded-2xl bg-[#FFFDF6] border border-[#264653]/8 p-2.5 flex items-center gap-2.5 ${isDragging ? "shadow-xl opacity-95 scale-[1.02] z-10" : "shadow-sm"}`}
     >
       <button
-        className="touch-none cursor-grab p-1"
+        className="touch-none cursor-grab w-8 h-10 rounded-xl bg-[#F5F0E1] grid place-items-center text-[#264653]/35 shrink-0"
         aria-label={`拖动${typeMeta(type, species).label}`}
         {...attributes}
         {...listeners}
       >
-        <GripVertical size={17} />
+        <GripVertical size={18} />
       </button>
-      <span className="flex-1 text-left">{typeMeta(type, species).label}</span>
+      <span
+        className={`w-10 h-10 rounded-2xl grid place-items-center shrink-0 ${COLORS[type]}`}
+      >
+        {(() => {
+          const I = ICONS[type];
+          return <I size={19} />;
+        })()}
+      </span>
+      <span className="flex-1 min-w-0 text-left">
+        <b className="block text-sm truncate">
+          {typeMeta(type, species).label}
+        </b>
+        <small className="block text-[9px] text-[#264653]/38 mt-0.5">
+          主页第 {index + 1} 项
+        </small>
+      </span>
       <button
         onClick={onRemove}
         aria-label={`移除${typeMeta(type, species).label}`}
+        className="w-8 h-8 rounded-full bg-[#E76F51]/8 text-[#C0452B]/65 grid place-items-center shrink-0"
       >
         <X size={16} />
       </button>
@@ -1662,19 +2126,24 @@ function DataBackup({ data }: { data: Data }) {
   };
   return (
     <section className="px-5 pb-6">
-      <div className="bg-[#FFFDF6] rounded-3xl p-4">
-        <h2 className="font-bold flex gap-2">
-          <DatabaseBackup />
-          本地备份
-        </h2>
-        <p className="text-xs text-[#264653]/50 mt-1">
-          整库导出包含活动及归档宠物、记录、物品和照片。
-        </p>
+      <div className="relative overflow-hidden bg-[#264653] text-[#FFFDF6] rounded-[1.75rem] p-4 shadow-sm">
+        <span className="absolute -right-10 -bottom-16 w-36 h-36 rounded-full bg-[#A8DADC]/10" />
+        <div className="relative flex items-start gap-3">
+          <span className="w-10 h-10 rounded-2xl bg-white/10 grid place-items-center text-[#A8DADC] shrink-0">
+            <DatabaseBackup size={20} />
+          </span>
+          <div>
+            <h2 className="font-bold">本地数据保险箱</h2>
+            <p className="text-[10px] text-white/55 mt-1 leading-relaxed">
+              备份包含全部宠物、生活记录、物品和照片，数据只保存在你的设备中。
+            </p>
+          </div>
+        </div>
         <div className="grid grid-cols-2 gap-2 mt-3">
           <button
             disabled={busy}
             onClick={() => void exp()}
-            className="secondary"
+            className="relative rounded-2xl bg-[#FFFDF6] text-[#264653] py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
           >
             <Download size={15} />
             导出备份
@@ -1682,14 +2151,14 @@ function DataBackup({ data }: { data: Data }) {
           <button
             disabled={busy}
             onClick={() => void imp()}
-            className="secondary"
+            className="relative rounded-2xl bg-white/10 text-white py-2.5 text-xs font-semibold flex items-center justify-center gap-1.5 disabled:opacity-50"
           >
             <Upload size={15} />
             导入备份
           </button>
         </div>
         {notice && (
-          <p className="text-xs mt-2 flex gap-1">
+          <p className="relative text-[10px] text-[#A8DADC] mt-2 flex gap-1">
             <CheckCircle2 size={13} />
             {notice}
           </p>

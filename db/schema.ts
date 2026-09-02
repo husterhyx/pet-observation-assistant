@@ -1,4 +1,11 @@
-import { index, integer, real, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import {
+  index,
+  integer,
+  real,
+  sqliteTable,
+  text,
+  uniqueIndex,
+} from "drizzle-orm/sqlite-core";
 
 const legacyMetadataColumns = {
   updatedAt: text("updatedAt").notNull(),
@@ -13,8 +20,12 @@ export const petProfiles = sqliteTable("pet_profiles", {
   breed: text("breed").default("").notNull(),
   birthday: text("birthday").default("").notNull(),
   homeDate: text("homeDate").default("").notNull(),
-  gender: text("gender", { enum: ["boy", "girl"] }).default("boy").notNull(),
-  neutered: text("neutered", { enum: ["", "yes", "no"] }).default("").notNull(),
+  gender: text("gender", { enum: ["boy", "girl"] })
+    .default("boy")
+    .notNull(),
+  neutered: text("neutered", { enum: ["", "yes", "no"] })
+    .default("")
+    .notNull(),
   avatarAttachmentId: text("avatarAttachmentId"),
   archivedAt: text("archivedAt"),
   ...legacyMetadataColumns,
@@ -25,6 +36,7 @@ export const petRecords = sqliteTable(
   {
     id: text("id").primaryKey(),
     petId: text("petId").notNull(),
+    petIds: text("petIds").default("[]").notNull(),
     type: text("type").notNull(),
     title: text("title").notNull(),
     note: text("note").notNull(),
@@ -34,7 +46,7 @@ export const petRecords = sqliteTable(
     createdAt: text("createdAt").notNull(),
     ...legacyMetadataColumns,
   },
-  (table) => [index("pet_records_pet_time_idx").on(table.petId, table.time)],
+  table => [index("pet_records_pet_time_idx").on(table.petId, table.time)]
 );
 
 export const dailyPhotos = sqliteTable(
@@ -48,7 +60,7 @@ export const dailyPhotos = sqliteTable(
     createdAt: text("createdAt").notNull(),
     ...legacyMetadataColumns,
   },
-  (table) => [uniqueIndex("photos_pet_date_idx").on(table.petId, table.date)],
+  table => [uniqueIndex("photos_pet_date_idx").on(table.petId, table.date)]
 );
 
 export const supplies = sqliteTable(
@@ -56,6 +68,7 @@ export const supplies = sqliteTable(
   {
     id: text("id").primaryKey(),
     petId: text("petId"),
+    petIds: text("petIds").default("[]").notNull(),
     name: text("name").notNull(),
     brand: text("brand").default("").notNull(),
     variant: text("variant").default("").notNull(),
@@ -67,7 +80,7 @@ export const supplies = sqliteTable(
     note: text("note").default("").notNull(),
     ...legacyMetadataColumns,
   },
-  (table) => [index("supplies_pet_updated_idx").on(table.petId, table.updatedAt)],
+  table => [index("supplies_pet_updated_idx").on(table.petId, table.updatedAt)]
 );
 
 export const attachments = sqliteTable("attachments", {

@@ -77,6 +77,12 @@ pub fn run() {
             sql: include_str!("../../db/migrations/0003_multi_pet.sql"),
             kind: tauri_plugin_sql::MigrationKind::Up,
         },
+        tauri_plugin_sql::Migration {
+            version: 4,
+            description: "add_multi_member_links",
+            sql: include_str!("../../db/migrations/0004_multi_member_links.sql"),
+            kind: tauri_plugin_sql::MigrationKind::Up,
+        },
     ];
 
     tauri::Builder::default()

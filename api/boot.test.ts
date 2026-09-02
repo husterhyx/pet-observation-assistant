@@ -122,6 +122,34 @@ describe("multi-pet local SQLite backend", () => {
     expect(await caller.pet.listSupplies({ petId: dogId })).toHaveLength(2);
     expect(await caller.pet.listSupplies({ petId: catId })).toHaveLength(1);
   });
+  it("stores one record or supply with multiple pet members", async () => {
+    await caller.pet.addRecord({
+      petId: dogId,
+      petIds: [dogId, catId],
+      type: "feed",
+      title: "喂食",
+      note: "一起吃饭",
+      time: "2026-09-01T06:00:00.000Z",
+    });
+    const dogRecords = await caller.pet.listRecords({ petId: dogId });
+    const catRecords = await caller.pet.listRecords({ petId: catId });
+    expect(dogRecords).toHaveLength(2);
+    expect(catRecords).toHaveLength(2);
+    expect(dogRecords[0].petIds).toEqual([dogId, catId]);
+
+    await caller.pet.addSupply({
+      petId: dogId,
+      petIds: [dogId, catId],
+      name: "饮水机",
+      brand: "",
+      variant: "",
+      category: "其他",
+      stock: "plenty",
+      note: "",
+    });
+    expect(await caller.pet.listSupplies({ petId: dogId })).toHaveLength(3);
+    expect(await caller.pet.listSupplies({ petId: catId })).toHaveLength(2);
+  });
   it("stores cards by species and excludes archived pets", async () => {
     await caller.pet.saveHomeCards({
       species: "cat",
@@ -133,10 +161,10 @@ describe("multi-pet local SQLite backend", () => {
     ]);
     await caller.pet.archivePet({ id: catId });
     expect(await caller.pet.listPets({})).toHaveLength(1);
-    expect(await caller.pet.listRecords({})).toHaveLength(1);
+    expect(await caller.pet.listRecords({})).toHaveLength(2);
     expect(await caller.pet.listPhotos({})).toHaveLength(1);
-    expect(await caller.pet.listSupplies({})).toHaveLength(2);
-    expect(await caller.pet.listSupplies({ petId: dogId })).toHaveLength(2);
+    expect(await caller.pet.listSupplies({})).toHaveLength(3);
+    expect(await caller.pet.listSupplies({ petId: dogId })).toHaveLength(3);
     expect(await caller.pet.listPets({ includeArchived: true })).toHaveLength(
       2
     );

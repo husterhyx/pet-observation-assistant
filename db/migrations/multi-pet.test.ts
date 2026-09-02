@@ -75,3 +75,33 @@ describe("0003 multi-pet migration", () => {
     db.close();
   });
 });
+
+describe("0004 multi-member links migration", () => {
+  it("turns existing single owners into member arrays and keeps shared supplies", () => {
+    const db = new Database(":memory:");
+    db.exec(migration("0001_local_sqlite.sql"));
+    db.exec(migration("0003_multi_pet.sql"));
+    db.prepare(
+      `INSERT INTO pet_records
+      (id,petId,type,title,note,time,createdAt,updatedAt,modifiedByDeviceId)
+      VALUES ('record-1','profile','feed','喂食','','2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','2026-09-01T00:00:00.000Z','local')`
+    ).run();
+    db.prepare(
+      `INSERT INTO supplies
+      (id,petId,name,category,stock,updatedAt,modifiedByDeviceId)
+      VALUES ('owned','profile','狗粮','主粮','plenty','2026-09-01T00:00:00.000Z','local'),
+             ('shared',NULL,'纸巾','清洁','plenty','2026-09-01T00:00:00.000Z','local')`
+    ).run();
+    db.exec(migration("0004_multi_member_links.sql"));
+    expect(db.prepare("SELECT petIds FROM pet_records").get()).toEqual({
+      petIds: '["profile"]',
+    });
+    expect(
+      db.prepare("SELECT id,petIds FROM supplies ORDER BY id").all()
+    ).toEqual([
+      { id: "owned", petIds: '["profile"]' },
+      { id: "shared", petIds: "[]" },
+    ]);
+    db.close();
+  });
+});
